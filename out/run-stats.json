@@ -1,0 +1,21 @@
+{
+  "generated_at": "2026-11-22 01:27:04 +0000",
+  "candidates": 3825,
+  "prefilter_alive": 662,
+  "verified_both_ok": 270,
+  "verified_dead": 19,
+  "carry_loaded": 60,
+  "cn_probe": {
+    "enabled": false,
+    "budget": 150,
+    "pool": 0,
+    "attempted": 0,
+    "definitive": 0,
+    "ok": 0,
+    "unreachable": 0,
+    "unmeasured": 0,
+    "gate_ms": 120
+  },
+  "coverage": null,
+  "final": 260
+}
