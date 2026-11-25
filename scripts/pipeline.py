@@ -59,6 +59,11 @@ SOURCES = [
     ("ts-sf/fly", "main", "clash"),
     ("free18/v2ray", "main", "c.yaml"),
     ("chengaopan/AutoMergePublicNodes", "master", "list.yml"),
+    ("PuddinCat/BestClash", "main", "proxies.yaml"),
+    ("yy1588133/proxy-pool", "main", "clash.yaml"),
+    ("shaoyouvip/free", "main", "mihomo.yaml"),
+    ("zhuhaiuk/free-nodes", "main", "clash_config.yaml"),
+    ("mfuu/FreeProxies", "master", "sub.yaml"),
 ]
 
 # 非 GitHub 的每日源站：路径里的 {Y}/{M}/{D} 由 _daily_dates() 按北京日期填充。
@@ -1082,7 +1087,7 @@ def geolocate(servers):
 
 # ---------------------------------------------------------------- 8. 输出
 REGION_ORDER = [("HK", "🇭🇰 香港"), ("TW", "🇹🇼 台湾"), ("JP", "🇯🇵 日本"), ("SG", "🇸🇬 新加坡"),
-                ("US", "🇺🇸 美国"), ("KR", "🇰🇷 韩国")]
+                ("US", "🇺🇸 美国"), ("CA", "🇨🇦 加拿大"), ("KR", "🇰🇷 韩国")]
 EU = {"NL", "DE", "GB", "FR", "IT", "RU", "CH", "SE", "CZ", "LV", "AT", "IE", "FI", "NO", "DK",
       "PL", "ES", "PT", "RO", "BG", "HU", "SK", "UA", "LT", "EE", "BE", "LU", "MD", "RS", "HR",
       "GR", "TR", "CY", "MT", "IS", "AL"}
