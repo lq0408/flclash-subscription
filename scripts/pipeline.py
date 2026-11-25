@@ -81,7 +81,7 @@ ALLOWED_TYPES = {"ss", "ssr", "vmess", "vless", "trojan", "hysteria", "hysteria2
                  "anytls", "http", "socks5", "snell", "wireguard", "ssh", "mieru"}
 BAD_SERVER_PREFIX = ("127.", "0.0.0.0", "localhost", "::1", "10.", "192.168.", "172.16.", "172.17.",
                      "172.18.", "172.19.", "172.2", "172.30.", "172.31.", "169.254.", "example.com")
-BAD_NAME = re.compile(r"防范|剩余|流量|到期|过期|官网|订阅|重置|Expire|群组|Telegram|飞机")
+BAD_NAME = re.compile(r"防范|剩余|流量|到期|过期|官网|订阅|重置|Expire|群组|Telegram群|飞机")
 ISO2 = {"HK", "TW", "JP", "SG", "US", "KR", "GB", "DE", "NL", "FR", "IT", "RU", "CA", "CH", "SE",
         "CZ", "LV", "AT", "IE", "FI", "NO", "DK", "PL", "ES", "PT", "RO", "BG", "HU", "SK", "UA",
         "LT", "EE", "BE", "LU", "MD", "RS", "HR", "GR", "TR", "CY", "MT", "IS", "AL", "BR", "MX",
