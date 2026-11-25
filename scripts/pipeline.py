@@ -529,7 +529,7 @@ def measure(exe, proxies, workdir, workers, rounds, timeout_ms, test_url):
 
 
 # ---------------------------------------------------------------- 4. 严格验证
-# 唯一的下发标准：谷歌和 YouTube 都真能打开，且延迟不超过门槛。
+# 唯一的下发标准：谷歌、YouTube 和 Gemini 都真能打开，且延迟不超过门槛。
 GOOGLE_URL = "https://www.google.com/generate_204"
 YOUTUBE_URL = "https://www.youtube.com/"
 GEMINI_URL = "https://gemini.google.com/"
@@ -825,7 +825,7 @@ def verify_sites(exe, proxies, workdir, workers, rounds, timeout_ms, max_delay, 
 
 
 # ---------------------------------------------------------------- 5. 上海探针
-# GitHub 的机器在美国，只能证明“节点能出去看谷歌/YouTube”；而你在上海访问这个节点
+# GitHub 的机器在美国，只能证明“节点能出去看谷歌/YouTube/Gemini”；而你在上海访问这个节点
 # 到底多快，必须在国内量。globalping.io 有开放 API 和国内探针（上海/杭州/南京…），
 # 用 mtr(TCP) 或 ping 从探针到节点 IP:端口 的 RTT，就是“上海 -> 节点”的真实延迟。
 # 免费额度 250 次/小时（1 个探针 = 1 次），所以默认只量通过初筛的候选、并做了预算控制。
@@ -1729,7 +1729,7 @@ def main():
         return 1
     candidates = [p for p in merged if p["__id"] in quick]
 
-    log("[6/9] 严格验证：谷歌 + YouTube 可达性（%d 轮，机房延迟门槛 %dms）" %
+    log("[6/9] 严格验证：谷歌 + YouTube + Gemini 可达性（%d 轮，机房延迟门槛 %dms）" %
         (args.verify_rounds, args.max_delay))
     min_hits = args.min_hits or args.verify_rounds
     min_hits = max(1, min(min_hits, args.verify_rounds))
