@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-一站式流水线：抓取 GitHub 免费节点 -> 清洗去重 -> Mihomo 内核校验 -> 谷歌/YouTube 严格验证
+一站式流水线：抓取 GitHub 免费节点 -> 清洗去重 -> Mihomo 内核校验 -> 谷歌/YouTube/Gemini 严格验证
               -> 归属地 -> 生成 FLClash 配置
 
 下发的硬标准（全部满足才写进订阅）：
     1. 经内核实测能打开 https://www.google.com/generate_204   （返回 204）
     2. 经内核实测能打开 https://www.youtube.com/              （返回 200）
-    3. 机房（美国）到节点的延迟中位数 ≤ --max-delay（默认 200ms）
-    4. 多轮探测全部命中（--min-hits，默认 = --verify-rounds）
-    5. 上海探针（globalping.io）实测“上海 → 节点”RTT ≤ --cn-max-delay（默认 200ms）
+    3. 经内核实测能打开 https://gemini.google.com/            （返回 200 且没被跳走，地区封锁即失败）
+    4. 机房（美国）到节点的延迟中位数 ≤ --max-delay（默认 200ms）
+    5. 多轮探测全部命中（--min-hits，默认 = --verify-rounds）
+    6. 上海探针（globalping.io）实测“上海 → 节点”RTT ≤ --cn-max-delay（默认 200ms）
        —— 这一条才决定你在国内用起来快不快，节点名里的数字就是它
 
 另外每次构建会先复测上一版的节点（老节点优先）：上海 RTT ≤ --carry-max-delay
@@ -531,6 +532,7 @@ def measure(exe, proxies, workdir, workers, rounds, timeout_ms, test_url):
 # 唯一的下发标准：谷歌和 YouTube 都真能打开，且延迟不超过门槛。
 GOOGLE_URL = "https://www.google.com/generate_204"
 YOUTUBE_URL = "https://www.youtube.com/"
+GEMINI_URL = "https://gemini.google.com/"
 
 
 def _median(vals):
@@ -566,9 +568,11 @@ def http_probe(port, site, timeout_ms):
     所以那种测法证明不了“网页真能打开”。这里走真实请求 + 真实状态码 + 真实内容：
       google  —— 必须 204（generate_204 的标准返回）
       youtube —— 必须 200，且响应体里真含 youtube / ytimg 字样（挡掉劫持页、错误页）
+      gemini  —— 必须 200，且最终 URL 还在 gemini.google.com（地区封锁会被 302 跳走）
+                 且响应体里真含 gemini 字样
     返回 (ok, status, 毫秒, 错误说明)
     """
-    url = GOOGLE_URL if site == "google" else YOUTUBE_URL
+    url = {"google": GOOGLE_URL, "youtube": YOUTUBE_URL, "gemini": GEMINI_URL}[site]
     proxy = "http://127.0.0.1:%d" % port
     op = urllib.request.build_opener(
         urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
@@ -585,11 +589,21 @@ def http_probe(port, site, timeout_ms):
                     body = gzip.GzipFile(fileobj=io.BytesIO(body)).read(65536)
                 except Exception:  # noqa: BLE001
                     pass
-            body = body.lower()
+            body_l = body.lower()
+            if site == "youtube":
+                if code != 200:
+                    return False, code, ms, "状态码 %d" % code
+                if len(body_l) < 2000 or (b"youtube" not in body_l and b"ytimg" not in body_l):
+                    return False, code, ms, "返回内容不是 YouTube（%d 字节）" % len(body_l)
+                return True, code, ms, ""
+            # ---- gemini ----
             if code != 200:
                 return False, code, ms, "状态码 %d" % code
-            if len(body) < 2000 or (b"youtube" not in body and b"ytimg" not in body):
-                return False, code, ms, "返回内容不是 YouTube（%d 字节）" % len(body)
+            final = (resp.geturl() or "").lower()
+            if "gemini.google.com" not in final:
+                return False, code, ms, "被跳走: %s" % final[:70]
+            if len(body_l) < 2000 or b"gemini" not in body_l:
+                return False, code, ms, "返回内容不是 Gemini（%d 字节）" % len(body_l)
             return True, code, ms, ""
     except urllib.error.HTTPError as e:
         return False, e.code, int((time.time() - t0) * 1000), "HTTP %d" % e.code
@@ -598,8 +612,8 @@ def http_probe(port, site, timeout_ms):
 
 
 def probe_one_node(port, rounds, timeout_ms):
-    """一个节点测两个站（顺序执行，避免自己抢自己的带宽把延迟测虚高）"""
-    g, y, g_err, y_err = [], [], "", ""
+    """一个节点测三个站（顺序执行，避免自己抢自己的带宽把延迟测虚高）"""
+    g, y, m, g_err, y_err, m_err = [], [], [], "", "", ""
     for _ in range(max(1, rounds)):
         ok, code, ms, err = http_probe(port, "google", timeout_ms)
         if ok:
@@ -612,7 +626,13 @@ def probe_one_node(port, rounds, timeout_ms):
             y.append(ms)
         else:
             y_err = err
-    return _median(g), len(g), g_err, _median(y), len(y), y_err
+    for _ in range(max(1, rounds)):
+        ok, code, ms, err = http_probe(port, "gemini", timeout_ms)
+        if ok:
+            m.append(ms)
+        else:
+            m_err = err
+    return _median(g), len(g), g_err, _median(y), len(y), y_err, _median(m), len(m), m_err
 
 
 def write_verify_config(path, proxies, ctl, ports, mixed, reject_port):
@@ -670,10 +690,12 @@ def _verify_chunk(exe, chunk, workdir, workers, rounds, timeout_ms):
                 done += 1
                 if done % 50 == 0:
                     log("    %d/%d 已测  通过 %d  %.0fs"
-                        % (done, len(chunk), sum(1 for v in rows.values() if v[0] and v[3]),
+                        % (done, len(chunk),
+                           sum(1 for v in rows.values() if v[0] and v[3] and v[6]),
                            time.time() - t0))
         log("  本批 %d 个节点实测完成 %.0fs（通过 %d）"
-            % (len(chunk), time.time() - t0, sum(1 for v in rows.values() if v[0] and v[3])))
+            % (len(chunk), time.time() - t0,
+               sum(1 for v in rows.values() if v[0] and v[3] and v[6])))
     finally:
         proc.terminate()
         try:
@@ -744,16 +766,17 @@ def stress_test(exe, proxies, workdir, workers, burst, timeout_ms, min_ok_ratio,
 
 
 def verify_sites(exe, proxies, workdir, workers, rounds, timeout_ms, max_delay, min_hits):
-    """严格验证：谷歌 204 + YouTube 200 都得真拿到，且延迟 ≤ max_delay。
+    """严格验证：谷歌 204 + YouTube 200 + Gemini 200 都得真拿到，且延迟 ≤ max_delay。
 
     做法：给每个节点开一个独立入站端口（mihomo listeners 的 proxy 字段），
     然后从本机真实发出 HTTP/HTTPS 请求 —— 状态码、响应内容、TLS 全是真的，
     和你在浏览器里打开是一回事，不是“看着像通”。
 
     返回 ({__id: {...}}, 统计)，并给节点打 __tier：
-      full  = 谷歌 + YouTube 都通，延迟达标  -> 下发
-      slow  = 两个都通但延迟超标            -> 默认丢弃，--keep-slow 才保留
-      gonly = 只有谷歌通，YouTube 不通       -> 默认丢弃，--keep-gonly 才保留
+      full  = 谷歌 + YouTube + Gemini 都通，延迟达标  -> 下发
+      slow  = 三个都通但延迟超标                      -> 默认丢弃，--keep-slow 才保留
+      gonly = 只有谷歌通（YouTube/Gemini 不通）       -> 默认丢弃，--keep-gonly 才保留
+      ngem  = 谷歌 + YouTube 通但 Gemini 不通（多为地区封锁，如香港入口）-> 默认丢弃，--keep-ngem 才保留
     """
     for i, p in enumerate(proxies):
         if not p.get("__id"):
@@ -773,16 +796,23 @@ def verify_sites(exe, proxies, workdir, workers, rounds, timeout_ms, max_delay, 
         rows.update(part)
 
     result = {}
-    stat = {"full": 0, "slow": 0, "gonly": 0, "dead": 0, "youtube_only": 0}
-    for nid, (g, gh, ge, y, yh, ye) in rows.items():
+    stat = {"full": 0, "slow": 0, "gonly": 0, "ngem": 0, "dead": 0, "youtube_only": 0}
+    for nid, (g, gh, ge, y, yh, ye, m, mh, me) in rows.items():
         ok_g = g is not None and gh >= min_hits
         ok_y = y is not None and yh >= min_hits
-        if ok_g and ok_y:
+        ok_m = m is not None and mh >= min_hits
+        if ok_g and ok_y and ok_m:
             tier = "full" if g <= max_delay else "slow"
-            result[nid] = {"delay": g, "hits": gh, "google": g, "youtube": y, "tier": tier}
+            result[nid] = {"delay": g, "hits": gh, "google": g, "youtube": y,
+                           "gemini": m, "tier": tier}
+        elif ok_g and ok_y:
+            tier = "ngem"
+            result[nid] = {"delay": g, "hits": gh, "google": g, "youtube": y,
+                           "gemini": None, "tier": tier}
         elif ok_g:
             tier = "gonly"
-            result[nid] = {"delay": g, "hits": gh, "google": g, "youtube": None, "tier": tier}
+            result[nid] = {"delay": g, "hits": gh, "google": g, "youtube": None,
+                           "gemini": None, "tier": tier}
         elif ok_y:
             # 谷歌不通、YouTube 通：说明节点里塞了分流/劫持，不可信，直接丢
             stat["youtube_only"] += 1
@@ -1102,8 +1132,8 @@ EU = {"NL", "DE", "GB", "FR", "IT", "RU", "CH", "SE", "CZ", "LV", "AT", "IE", "F
       "GR", "TR", "CY", "MT", "IS", "AL"}
 
 # 下发优先级与名字后缀：只有 full 会进主池，其余只是可选收纳
-TIER_RANK = {"full": 0, "slow": 1, "gonly": 2}
-TIER_TAG = {"full": "", "slow": " ·高延迟", "gonly": " ·仅谷歌"}
+TIER_RANK = {"full": 0, "slow": 1, "gonly": 2, "ngem": 3}
+TIER_TAG = {"full": "", "slow": " ·高延迟", "gonly": " ·仅谷歌", "ngem": " ·无Gemini"}
 # 亚太地区：CI 机房在美国，这些节点“机房延迟”天然偏高，但国内用其实快，单独给宽门槛
 ASIA = {"HK", "TW", "JP", "SG", "KR", "MO"}
 # 只保留这五个地区（用户明确要求）：日本、新加坡、韩国、台湾、香港
@@ -1295,7 +1325,8 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
     all_names = [it["name"] for it in items]
     # 没通过完整验证的（延迟超标 / YouTube 不通）只在带 --keep-* 时才会存在，单独分组收纳
     extra = [(tier, label, [it["name"] for it in items if it["tier"] == tier])
-             for tier, label in (("slow", "🐢 高延迟备用"), ("gonly", "⚠️ 仅谷歌可用"))]
+             for tier, label in (("slow", "🐢 高延迟备用"), ("gonly", "⚠️ 仅谷歌可用"),
+                                 ("ngem", "🚫 无Gemini备用"))]
     extra = [x for x in extra if x[2]]
 
     regions = {}
@@ -1316,7 +1347,7 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
                 stamp, time.strftime("%z"), len(proxies) + len(sh),
                 "（自建 %d + 免费 %d）" % (len(sh), len(proxies)) if sh else ""),
             "# 数据来源: GitHub 上每日更新的公开免费节点库，合并去重后逐个实测：",
-            "#   ① 谷歌 (www.google.com/generate_204) 与 YouTube (www.youtube.com) 都能真打开；",
+            "#   ① 谷歌 (www.google.com/generate_204)、YouTube (www.youtube.com) 和 Gemini (gemini.google.com) 都能真打开；",
             ("#   ② 上海探针（globalping.io）实测“上海 → 节点”RTT ≤ %dms，节点名里的数字就是上海延迟。"
              % DELAY_GATE_CN) if DELAY_GATE_CN else
             ("#   ② 机房实测延迟 ≤ %dms，并通过 %d 并发压测（成功率≥%.0f%%、抖动≤%dms）；"
@@ -1587,6 +1618,9 @@ def main():
                     help="完整通过的节点不足时不要自动补高延迟节点（默认会自动补，避免下发空订阅）")
     ap.add_argument("--keep-gonly", action="store_true",
                     help="保留 YouTube 打不开、只有谷歌通的节点（放进“⚠️ 仅谷歌可用”组），默认丢弃")
+    ap.add_argument("--keep-ngem", action="store_true",
+                    help="保留谷歌+YouTube 通但 Gemini 打不开的节点（放进“🚫 无Gemini备用”组），默认丢弃。"
+                         "注意：Gemini 对部分地区（如香港入口）封锁，开了这个香港节点会回到备用组")
     ap.add_argument("--max-candidates", type=int, default=0,
                     help="只取前 N 个候选参与测速（调试用），0 = 全部")
     ap.add_argument("--selfhost", default="",
@@ -1933,17 +1967,20 @@ def main():
     n_full = sum(1 for v in verified.values() if v["tier"] == "full")
     n_slow = sum(1 for v in verified.values() if v["tier"] == "slow")
     n_gonly = sum(1 for v in verified.values() if v["tier"] == "gonly")
+    n_ngem = sum(1 for v in verified.values() if v["tier"] == "ngem")
     unit = "上海" if cn_hit else "机房"
-    log("  谷歌+YouTube 都通，且%s延迟 ≤%dms: %d 个 ✔"
+    log("  谷歌+YouTube+Gemini 都通，且%s延迟 ≤%dms: %d 个 ✔"
         % (unit, args.cn_max_delay if cn_hit else args.max_delay, n_full))
     log("  延迟超标: %d 个%s" % (n_slow, "，已保留" if args.keep_slow else "，丢弃"))
     log("  YouTube 不通（仅谷歌）: %d 个%s" % (n_gonly, "，已保留" if args.keep_gonly else "，丢弃"))
-    log("  两个站点都不通: %d 个，丢弃" % vstat["dead"])
+    log("  Gemini 不通（谷歌+YouTube 通，多为地区封锁）: %d 个%s"
+        % (n_ngem, "，已保留" if args.keep_ngem else "，丢弃"))
+    log("  三个站点都不通: %d 个，丢弃" % vstat["dead"])
     if vstat["youtube_only"]:
         log("  只有 YouTube 通、谷歌不通（可疑节点）: %d 个，丢弃" % vstat["youtube_only"])
     ds = sorted(info["delay"] for info in verified.values() if info["delay"])
     if ds:
-        log("  双站都通的节点%s延迟分布: <100ms %d | 100-200ms %d | 200-400ms %d | 400-800ms %d | >800ms %d"
+        log("  三站都通的节点%s延迟分布: <100ms %d | 100-200ms %d | 200-400ms %d | 400-800ms %d | >800ms %d"
             % (unit, sum(1 for d in ds if d < 100), sum(1 for d in ds if 100 <= d < 200),
                sum(1 for d in ds if 200 <= d < 400), sum(1 for d in ds if 400 <= d < 800),
                sum(1 for d in ds if d >= 800)))
@@ -1966,10 +2003,12 @@ def main():
             continue
         if info["tier"] == "gonly" and not args.keep_gonly:
             continue
+        if info["tier"] == "ngem" and not args.keep_ngem:
+            continue
         p["__tier"] = info["tier"]
         nodes_delay[p["__id"]] = {"delay": info["delay"], "hits": info["hits"],
                                   "tests": args.verify_rounds, "cn": info.get("cn")}
-    # 兜底：完整通过的太少时，自动补几个“能打开两个站、只是慢”的节点，
+    # 兜底：完整通过的太少时，自动补几个“能打开三个站、只是慢”的节点，
     # 免得某天门槛过严直接下发空订阅（它们会单独进「🐢 高延迟备用」，不进主池）
     if args.fallback_slow and len(nodes_delay) < args.min_nodes:
         spare = [p for p in candidates
@@ -2023,7 +2062,8 @@ def main():
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S %z"),
         "candidates": len(merged),                       # 抓取去重后的候选
         "prefilter_alive": len(quick),                   # 过初筛（HTTP 可达）
-        "verified_both_ok": len(verified),               # 谷歌+YouTube 都通
+        "verified_both_ok": len(verified),               # 谷歌+YouTube+Gemini 都通（含仅 --keep-* 兜住的）
+        "verified_ngem": vstat.get("ngem", 0),           # 谷歌+YouTube 通但 Gemini 不通
         "verified_dead": vstat.get("dead", 0),
         "carry_loaded": len(prev),
         "cn_probe": {
