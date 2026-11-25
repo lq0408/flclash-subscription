@@ -1248,14 +1248,11 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
     items.sort(key=lambda x: (0 if x["carry"] else 1,
                               TIER_RANK.get(x["tier"], 3), x["delay"], -x["hits"]))
 
-    # 每地区只留最快的 N 个（自建/carry 不占额度）：聚合源里美国、未知地区动辄几百个，
-    # 国内大多超时，全留着只会拖慢客户端、稀释自动选择。0=不限制。
+    # 每地区只留最快的 N 个（carry 老选手同样占额度，否则上一版的美国垃圾会成批续命）：
+    # 聚合源里美国、未知地区动辄几百个，国内大多超时，全留着只会拖慢客户端、稀释自动选择。0=不限制。
     if max_per_region > 0:
         kept, quota = [], {}
         for it in items:
-            if it["carry"]:
-                kept.append(it)
-                continue
             cc = it["cc"] if it["cc"] in ISO2 else "XX"
             quota[cc] = quota.get(cc, 0) + 1
             if quota[cc] <= max_per_region:
