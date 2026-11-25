@@ -72,8 +72,10 @@ jobs:
           # --max-per-region 50  : 每个地区只留最快的 50 个（美国/未知地区几百个垃圾节点大多国内超时）
           # --max-delay 3000     : 机房延迟只做粗筛（机房侧绕路时能到 2238ms，但国内实测 222ms）
           # --burst 6            : 每个节点同时开 6 条连接压测，成功率 ≥80%、抖动 ≤150ms 才算过
+          # --region-cap          : 地区配比按用户偏好：美/加/台放宽，日/韩/港收紧，其余默认 50
           python -u scripts/pipeline.py --workers 128 --rounds 2 --timeout 3000 \
             --cn-types "" --cn-region asia_na --max-delay 3000 --max-per-region 50 \
+            --region-cap "US=120,CA=100,TW=80,SG=40,JP=15,KR=10,HK=10" \
             --burst 6 --burst-min-ok 0.8 --burst-jitter 300 \
             --min-nodes 3 \
             --second-out out/flclash-broad.yaml \

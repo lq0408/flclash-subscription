@@ -67,6 +67,9 @@ SOURCES = [
     # 台湾节点补充源：大体量聚合库，TW 服务器占比可观（按服务器 IP 归属筛选）
     ("Barabama/FreeNodes", "main", "nodes/merged.yaml"),
     ("snakem982/proxypool", "main", "source/clash-meta-2.yaml"),
+    # 美/加补充源（用户偏好美加台）：awesome-vpn 每日更新精选，longyang 每日 01:00 实测筛选
+    ("awesome-vpn/awesome-vpn", "master", "clash.yaml"),
+    ("longyang1233/free-nodes-sub", "main", "clash.yaml"),
 ]
 
 # 非 GitHub 的每日源站：路径里的 {Y}/{M}/{D} 由 _daily_dates() 按北京日期填充。
@@ -78,6 +81,9 @@ EXTRA_SOURCES = [
     ("clashnode.me", "https://clashnode.me/uploads/{Y}/{M}/0-{D}.yaml"),
     ("nodefree.org", "https://nodefree.org/dy/{Y}/{M}/{D}.yaml"),
     ("v2rayshare.com", "https://v2rayshare.com/uploads/{Y}/{M}/0-{D}.yaml"),
+    # clashfreenode.com 的 GitHub 仓库每日发 feed/clash-{YYYYMMDD}.yaml（{D} 即 YYYYMMDD）：
+    # 单文件 1MB+ 约 2000 节点，美国 500+ / 加拿大 30+，是美加节点的主力源
+    ("clashfreenode.com", "https://raw.githubusercontent.com/clashfreenodecom/clashfreenode.com/main/feed/clash-{D}.yaml"),
 ]
 
 ALLOWED_TYPES = {"ss", "ssr", "vmess", "vless", "trojan", "hysteria", "hysteria2", "tuic",
@@ -1233,7 +1239,7 @@ def second_build(candidates, verified, geo, path, regions):
 
 
 def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, write_txt=True,
-          max_per_region=0):
+          max_per_region=0, region_cap=None):
     selfhost = selfhost or []
     items = []
     for p in nodes:
@@ -1249,16 +1255,20 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
                               TIER_RANK.get(x["tier"], 3), x["delay"], -x["hits"]))
 
     # 每地区只留最快的 N 个（carry 老选手同样占额度，否则上一版的美国垃圾会成批续命）：
-    # 聚合源里美国、未知地区动辄几百个，国内大多超时，全留着只会拖慢客户端、稀释自动选择。0=不限制。
-    if max_per_region > 0:
+    # region_cap 可按地区覆盖（如美国/加拿大/台湾放宽、日韩港收紧），未列出的地区用 max_per_region。
+    region_cap = region_cap or {}
+    if max_per_region > 0 or region_cap:
         kept, quota = [], {}
         for it in items:
             cc = it["cc"] if it["cc"] in ISO2 else "XX"
+            lim = region_cap.get(cc, max_per_region)
             quota[cc] = quota.get(cc, 0) + 1
-            if quota[cc] <= max_per_region:
+            if quota[cc] <= lim:
                 kept.append(it)
-        log("  地区配额（每地区 ≤%d）：剔除 %d 个慢节点，%d → %d"
-            % (max_per_region, len(items) - len(kept), len(items), len(kept)))
+        log("  地区配额（默认 ≤%d%s）：剔除 %d 个慢节点，%d → %d"
+            % (max_per_region,
+               "，覆盖 " + " ".join("%s=%d" % kv for kv in sorted(region_cap.items())) if region_cap else "",
+               len(items) - len(kept), len(items), len(kept)))
         items = kept
 
     counters, proxies = {}, []
@@ -1526,8 +1536,11 @@ def main():
     ap.add_argument("--second-regions", default="HK,TW,JP,KR,SG,CA",
                     help="宽口径订阅保留的地区，默认 HK,TW,JP,KR,SG,CA")
     ap.add_argument("--max-per-region", type=int, default=0,
-                    help="主订阅每个地区最多保留 N 个最快的节点（自建不占额度），0=不限制。"
+                    help="主订阅每个地区最多保留 N 个最快的节点（carry 老选手同样占额度），0=不限制。"
                          "聚合源里美国/未知地区动辄几百个且国内大多超时，建议 50")
+    ap.add_argument("--region-cap", default="",
+                    help="按地区覆盖配额，格式 US=120,CA=100,TW=80,JP=15,KR=10,HK=10；"
+                         "未列出的地区沿用 --max-per-region")
     ap.add_argument("--cn-check", dest="cn_check", action="store_true",
                     help="启用 globalping 上海探针实测（**默认关闭**：实测它与真实体验相关性差，"
                          "改用下面的并发压测 + 地区/协议筛选）")
@@ -1989,8 +2002,15 @@ def main():
     sh_nodes = load_selfhost(args.selfhost)
     if sh_nodes:
         log("  已载入自建节点 %d 个: %s" % (len(sh_nodes), ", ".join(p["name"] for p in sh_nodes)))
+    region_cap = {}
+    if args.region_cap.strip():
+        for kv in args.region_cap.split(","):
+            cc, _, n = kv.partition("=")
+            if cc.strip() and n.strip().isdigit():
+                region_cap[cc.strip().upper()] = int(n)
     items, proxies = build(alive, geo, args.out, args.workers, sh_nodes,
-                           args.public_out or None, max_per_region=args.max_per_region)
+                           args.public_out or None, max_per_region=args.max_per_region,
+                           region_cap=region_cap)
     log("  输出: %s  (免费 %d + 自建 %d)" % (args.out, len(proxies), len(sh_nodes)))
     if args.public_out:
         log("  公开版: %s  (只含免费节点)" % args.public_out)
