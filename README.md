@@ -26,11 +26,11 @@ out/nodes.txt                 ← 纯文本清单：IP / 端口 / 协议 / 延�
 
 | 用途 | 地址 |
 | --- | --- |
-| 标准 raw | `https://raw.githubusercontent.com/<用户名>/<仓库名>/main/out/flclash-free-nodes.yaml` |
-| 国内一般能开（jsDelivr） | `https://cdn.jsdelivr.net/gh/<用户名>/<仓库名>@main/out/flclash-free-nodes.yaml` |
-| 另一个加速镜像 | `https://ghfast.top/https://raw.githubusercontent.com/<用户名>/<仓库名>/main/out/flclash-free-nodes.yaml` |
+| 标准 raw | `https://raw.githubusercontent.com/<用户名>/<仓库名>/master/out/flclash-free-nodes.yaml` |
+| 国内一般能开（jsDelivr） | `https://cdn.jsdelivr.net/gh/<用户名>/<仓库名>@master/out/flclash-free-nodes.yaml` |
+| 另一个加速镜像 | `https://ghfast.top/https://raw.githubusercontent.com/<用户名>/<仓库名>/master/out/flclash-free-nodes.yaml` |
 
-> **分支名要写对**：新建仓库默认是 `main`，但你这个仓库的分支是 **`master`**，所以地址里要写 `/master/`，否则 404。
+> **分支名要写对**：本仓库只有 **`master`** 分支（`main` 已删除），地址里要写 `/master/`，写成 `/main/` 会 404。
 > 不确定就看仓库首页左上角的 branch 下拉框。
 
 ## 导入 FLClash

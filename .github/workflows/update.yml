@@ -6,7 +6,7 @@ on:
     - cron: "17 21 * * *"      # UTC 21:17 = 北京 05:17
   workflow_dispatch:            # 也可以手动点 “Run workflow”
   push:
-    branches: [main, master]
+    branches: [master]
     paths:
       - "scripts/**"
       - ".github/workflows/**"
