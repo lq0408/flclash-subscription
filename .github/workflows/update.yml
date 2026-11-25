@@ -69,10 +69,11 @@ jobs:
           #       实测 http 类型的节点可以只有 61ms、vless 也有能用的，按类型排除会误杀。
           # --cn-types ""        : 不限协议（曾经用 ss,trojan，实测误杀了 http/vless）
           # --cn-region asia_na  : 只保留 日/新/韩/台/港 + 美/加（归属未知的也留），其余剔除
+          # --max-per-region 50  : 每个地区只留最快的 50 个（美国/未知地区几百个垃圾节点大多国内超时）
           # --max-delay 3000     : 机房延迟只做粗筛（机房侧绕路时能到 2238ms，但国内实测 222ms）
           # --burst 6            : 每个节点同时开 6 条连接压测，成功率 ≥80%、抖动 ≤150ms 才算过
           python -u scripts/pipeline.py --workers 128 --rounds 2 --timeout 3000 \
-            --cn-types "" --cn-region asia_na --max-delay 3000 \
+            --cn-types "" --cn-region asia_na --max-delay 3000 --max-per-region 50 \
             --burst 6 --burst-min-ok 0.8 --burst-jitter 300 \
             --min-nodes 3 \
             --second-out out/flclash-broad.yaml \

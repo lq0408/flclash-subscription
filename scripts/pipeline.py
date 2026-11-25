@@ -1232,7 +1232,8 @@ def second_build(candidates, verified, geo, path, regions):
     return path
 
 
-def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, write_txt=True):
+def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, write_txt=True,
+          max_per_region=0):
     selfhost = selfhost or []
     items = []
     for p in nodes:
@@ -1246,6 +1247,22 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
     # 老选手（上一版保留的）排最前，然后才是完整通过的，其余垫后
     items.sort(key=lambda x: (0 if x["carry"] else 1,
                               TIER_RANK.get(x["tier"], 3), x["delay"], -x["hits"]))
+
+    # 每地区只留最快的 N 个（自建/carry 不占额度）：聚合源里美国、未知地区动辄几百个，
+    # 国内大多超时，全留着只会拖慢客户端、稀释自动选择。0=不限制。
+    if max_per_region > 0:
+        kept, quota = [], {}
+        for it in items:
+            if it["carry"]:
+                kept.append(it)
+                continue
+            cc = it["cc"] if it["cc"] in ISO2 else "XX"
+            quota[cc] = quota.get(cc, 0) + 1
+            if quota[cc] <= max_per_region:
+                kept.append(it)
+        log("  地区配额（每地区 ≤%d）：剔除 %d 个慢节点，%d → %d"
+            % (max_per_region, len(items) - len(kept), len(items), len(kept)))
+        items = kept
 
     counters, proxies = {}, []
     for it in items:
@@ -1508,6 +1525,9 @@ def main():
                     help="另存一份宽口径订阅（只做双站验证 + 地区筛选，不限协议、不压测），用于对照")
     ap.add_argument("--second-regions", default="HK,TW,JP,KR,SG,CA",
                     help="宽口径订阅保留的地区，默认 HK,TW,JP,KR,SG,CA")
+    ap.add_argument("--max-per-region", type=int, default=0,
+                    help="主订阅每个地区最多保留 N 个最快的节点（自建不占额度），0=不限制。"
+                         "聚合源里美国/未知地区动辄几百个且国内大多超时，建议 50")
     ap.add_argument("--cn-check", dest="cn_check", action="store_true",
                     help="启用 globalping 上海探针实测（**默认关闭**：实测它与真实体验相关性差，"
                          "改用下面的并发压测 + 地区/协议筛选）")
@@ -1970,7 +1990,7 @@ def main():
     if sh_nodes:
         log("  已载入自建节点 %d 个: %s" % (len(sh_nodes), ", ".join(p["name"] for p in sh_nodes)))
     items, proxies = build(alive, geo, args.out, args.workers, sh_nodes,
-                           args.public_out or None)
+                           args.public_out or None, max_per_region=args.max_per_region)
     log("  输出: %s  (免费 %d + 自建 %d)" % (args.out, len(proxies), len(sh_nodes)))
     if args.public_out:
         log("  公开版: %s  (只含免费节点)" % args.public_out)
