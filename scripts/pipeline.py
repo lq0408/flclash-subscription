@@ -64,6 +64,9 @@ SOURCES = [
     ("shaoyouvip/free", "main", "mihomo.yaml"),
     ("zhuhaiuk/free-nodes", "main", "clash_config.yaml"),
     ("mfuu/FreeProxies", "master", "sub.yaml"),
+    # 台湾节点补充源：大体量聚合库，TW 服务器占比可观（按服务器 IP 归属筛选）
+    ("Barabama/FreeNodes", "main", "nodes/merged.yaml"),
+    ("snakem982/proxypool", "main", "source/clash-meta-2.yaml"),
 ]
 
 # 非 GitHub 的每日源站：路径里的 {Y}/{M}/{D} 由 _daily_dates() 按北京日期填充。
