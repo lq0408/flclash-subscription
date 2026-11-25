@@ -1367,8 +1367,11 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
         groups.insert(0, {"name": "🚀 节点选择", "type": "select", "proxies": select_list})
         groups.append({"name": "♻️ 自动选择", "type": "url-test", "url": check_url,
                        "interval": 300, "tolerance": 50, "lazy": False, "proxies": main_pool})
+        # 故障转移只放亚太节点：CI 机房在美国，按机房延迟排的 main_pool 头部常被美国节点占满，
+        # 但国内体验最好的是港台日韩新（机房测得慢、用户反而连得快）
+        asia_names = [it["name"] for it in primary_items if it["cc"] in ASIA_STRICT]
         groups.append({"name": "🔯 故障转移", "type": "fallback", "url": check_url,
-                       "interval": 300, "proxies": main_pool[:20]})
+                       "interval": 300, "proxies": (asia_names or main_pool)[:20]})
         for lbl in order:
             groups.append({"name": lbl, "type": "url-test", "url": check_url,
                            "interval": 300, "tolerance": 50, "proxies": regions[lbl]})
