@@ -1,24 +1,24 @@
 {
-  "generated_at": "2026-11-26 14:59:41 +0000",
-  "candidates": 6104,
-  "prefilter_alive": 1500,
-  "verified_both_ok": 422,
+  "generated_at": "2026-11-26 15:08:10 +0000",
+  "candidates": 5670,
+  "prefilter_alive": 1097,
+  "verified_both_ok": 350,
   "verified_ngem": 0,
-  "gemini_ok": 52,
-  "residential_selected": 1,
-  "verified_dead": 20,
-  "carry_loaded": 60,
+  "gemini_ok": 79,
+  "residential_selected": 2,
+  "verified_dead": 18,
+  "carry_loaded": 33,
   "cn_probe": {
-    "enabled": true,
-    "budget": 140,
-    "pool": 573,
-    "attempted": 140,
-    "definitive": 140,
-    "ok": 22,
-    "unreachable": 181,
-    "unmeasured": 219,
-    "gate_ms": 450
+    "enabled": false,
+    "budget": 150,
+    "pool": 0,
+    "attempted": 0,
+    "definitive": 0,
+    "ok": 0,
+    "unreachable": 0,
+    "unmeasured": 0,
+    "gate_ms": 120
   },
-  "coverage": 0.244,
-  "final": 53
+  "coverage": null,
+  "final": 84
 }
