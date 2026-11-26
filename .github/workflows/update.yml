@@ -76,12 +76,17 @@ jobs:
           #   （US=80：Gemini 三站验证后美国节点质量参差，压到 80 只留最好的；住宅 IP 优先入选）
           # --resi-cap 3          : 每个地区额外保底 3 个住宅 IP（不占地区配额，全局 ≤40），
           #   否则“同地区更快的机房节点”会把家宽节点挤掉
-          # 源清单 2026-11-26 精简：剔除停更的 cysk003/freeSub、零独立贡献的 ts-sf/fly 与
-          # zhuhaiuk/free-nodes、以及 0 住宅的 awesome-vpn，优先保留住宅 IP 占比高的源
+          # --resi-cc TW,CA       : 只有台湾/加拿大的家宽 IP 才算“住宅”。免费源里的住宅节点
+          #   78 个中有 29 个是美国、27 个是中国大陆、8 个韩国 —— 这些“别国家宽”对国内用户
+          #   没用，还会把「🏠 住宅IP优选」组塞满，所以只认 TW/CA（空字符串=不过滤）
+          # 源清单 2026-11-26 二次精简（16 → 6）：按留一法算过，anaer/Barabama/yy1588133/
+          # longyang/snakem982/ermaozi 这 6 家之外的所有源独有贡献都是 0，删掉只丢 7 个节点
+          # （0.2%），但每天少抓 9 次、少测几百个垃圾；其中 ripaojiedian(42%)、shaoyouvip(50%)
+          # 的日韩港占比最高，是典型的“日韩港垃圾源”
           python -u scripts/pipeline.py --workers 128 --rounds 2 --timeout 3000 \
             --cn-types "" --cn-region asia_na --max-delay 3000 --max-per-region 50 \
             --region-cap "US=80,CA=100,TW=80,SG=40,JP=15,KR=10,HK=10" \
-            --resi-cap 3 --max-resi-total 40 \
+            --resi-cap 3 --max-resi-total 40 --resi-cc "TW,CA" \
             --burst 6 --burst-min-ok 0.8 --burst-jitter 300 \
             --min-nodes 3 \
             --second-out out/flclash-broad.yaml \

@@ -13,9 +13,11 @@
     6. 上海探针（globalping.io）实测“上海 → 节点”RTT ≤ --cn-max-delay（默认 200ms）
        —— 这一条才决定你在国内用起来快不快，节点名里的数字就是它
 
-筛选偏好：住宅 IP（家宽 ISP，按 isp/org/asn/rDNS 关键词启发式判定）优先入选并靠前
-排列，节点名带「·住宅」标记，另有「🏠 住宅IP优选」url-test 分组。排序只在同验证档内
-生效：住宅 > 老选手 > 机房，所以上一版留下的机房节点不会挤掉本轮抓到的家宽节点。
+筛选偏好：住宅 IP 优先入选并靠前排列，节点名带「·住宅」标记，另有「🏠 住宅IP优选」
+url-test 分组。判定优先用 ip-api 的 hosting/proxy 布尔标记，缺失时退回 isp/org/asn/rDNS
+关键词启发式；默认只认台湾、加拿大的家宽（--resi-cc "TW,CA"），别国家宽不计入住宅。
+排序只在同验证档内生效：住宅 > 老选手 > 机房，所以上一版留下的机房节点不会挤掉本轮
+抓到的家宽节点。
 
 另外每次构建会先复测上一版的节点：上海 RTT ≤ --carry-max-delay（默认 150ms）的保留，
 超标的淘汰，其余名额照常由抓取流程补足。
@@ -53,29 +55,29 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) clash/mihomo"}
 
 # ---------------------------------------------------------------- 节点源
 # 只收 Clash / Mihomo 格式的公开订阅；失效的源会自动跳过，不影响整体。
-# 选源标准（2026-11-26 复核）：① 仍在更新（pushed_at 近 7 天）；② 去重后有独立贡献；
-# ③ 住宅 IP 占比尽量高。据此清掉了四类劣质源：
-#   - cysk003/freeSub：fork 且 2026-07-02 后停更，498 个独立节点里 494 个归属未知、0 住宅
-#   - ts-sf/fly、zhuhaiuk/free-nodes：全部节点都被 anaer/Barabama 等源覆盖，独立贡献 0
-#   - awesome-vpn/awesome-vpn：仅 27 个节点且全是机房 IP、0 住宅，体量不抵一次抓取
+# 选源标准（2026-11-26 二次复核）：① 仍在更新；② 去重后有独立贡献；③ 日韩港占比低；
+# ④ 住宅 IP 密度高。按“留一法”（逐个去掉源看还剩多少唯一下载点）算过账：
+#   anaer/Sub 独占 1731、Barabama 独占 1456、yy1588133 83、clashnode 59、longyang 54、
+#   snakem982 52 —— 这 6 个之外的所有源独立贡献都是 0，删掉只丢 7 个唯一下载点（0.2%）。
+# 因此本轮把源从 15 精简到 6，删掉的 9 个都不影响节点总量，但每天少抓 9 次、少测几百个垃圾：
+#   - ermaozi01/free_clash_vpn、peasoft/NoMoreWalls、mahdibland/ShadowsocksAggregator、
+#     free18/v2ray、chengaopan/AutoMergePublicNodes、PuddinCat/BestClash、
+#     shaoyouvip/free、mfuu/FreeProxies、ripaojiedian/freenode
+#     （ripaojiedian / shaoyouvip 的日韩港占比 42%~50%，是典型的“日韩港垃圾源”）
 SOURCES = [
-    ("ermaozi/get_subscribe", "main", "subscribe/clash.yml"),
-    ("ermaozi01/free_clash_vpn", "main", "subscribe/clash.yml"),
+    # 台湾 + 住宅 IP 主力：anaer 独家提供 3 个中华电信（Chunghwa）家宽 TW 节点，
+    # 全库唯一的 TW 住宅就出在 anaer 和 Barabama 这两家
     ("anaer/Sub", "main", "clash.yaml"),
-    ("ripaojiedian/freenode", "main", "clash"),
-    ("peasoft/NoMoreWalls", "master", "list.yml"),
-    ("mahdibland/ShadowsocksAggregator", "master", "Eternity.yml"),
-    ("free18/v2ray", "main", "c.yaml"),
-    ("chengaopan/AutoMergePublicNodes", "master", "list.yml"),
-    ("PuddinCat/BestClash", "main", "proxies.yaml"),
-    ("yy1588133/proxy-pool", "main", "clash.yaml"),
-    ("shaoyouvip/free", "main", "mihomo.yaml"),
-    ("mfuu/FreeProxies", "master", "sub.yaml"),
-    # 台湾节点补充源：大体量聚合库，TW 服务器占比可观（按服务器 IP 归属筛选）
+    # 最大体量聚合库（1500+ 独立节点、CA 410 / US 246），TW 住宅贡献 1 个
     ("Barabama/FreeNodes", "main", "nodes/merged.yaml"),
-    ("snakem982/proxypool", "main", "source/clash-meta-2.yaml"),
-    # 加拿大/美国补充源：longyang 每日 01:00 实测筛选，住宅 IP 占比最高（6/55）
+    # 住宅 IP 密度最高的源之一（9 个住宅 / 137 条），且能补 TW
+    ("yy1588133/proxy-pool", "main", "clash.yaml"),
+    # 加拿大/美国补充：longyang 每日 01:00 实测筛选
     ("longyang1233/free-nodes-sub", "main", "clash.yaml"),
+    # 体量不大但独立贡献 52 条，且日韩港占比只有 6%
+    ("snakem982/proxypool", "main", "source/clash-meta-2.yaml"),
+    # 独立住宅密度不高（3/344），但去重后仍能补 1 个中华电信 TW 家宽，留着兜底
+    ("ermaozi/get_subscribe", "main", "subscribe/clash.yml"),
 ]
 
 # 非 GitHub 的每日源站：路径里的 {Y}/{M}/{D} 由 _daily_dates() 按北京日期填充。
@@ -1113,15 +1115,18 @@ def geolocate(servers):
     for i in range(0, len(uniq), 100):
         chunk = uniq[i:i + 100]
         try:
-            # as/reverse/org 顺带拿来判“住宅 IP 还是机房 IP”（classify_resi 关键词启发式）
+            # as/reverse/org 顺带拿来判“住宅 IP 还是机房 IP”（classify_resi 关键词启发式）；
+            # hosting/proxy/mobile 是 ip-api 官方给出的布尔标记，比关键词猜准（见 classify_resi）
             body = json.dumps([{"query": ip,
-                                "fields": "status,country,countryCode,isp,org,as,reverse"} for ip in chunk]).encode()
+                                "fields": "status,country,countryCode,isp,org,as,reverse,hosting,proxy,mobile"}
+                               for ip in chunk]).encode()
             req = urllib.request.Request("http://ip-api.com/batch", data=body,
                                          headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"})
             for ip, r in zip(chunk, json.loads(urllib.request.urlopen(req, timeout=40).read().decode())):
                 info[ip] = {"cc": (r.get("countryCode") or "").upper(), "isp": r.get("isp") or "",
                             "org": r.get("org") or "", "as": r.get("as") or "",
-                            "reverse": r.get("reverse") or ""}
+                            "reverse": r.get("reverse") or "",
+                            "hosting": bool(r.get("hosting")), "proxy": bool(r.get("proxy"))}
         except Exception:  # noqa: BLE001
             for ip in chunk:
                 try:
@@ -1129,10 +1134,13 @@ def geolocate(servers):
                     conn = j.get("connection") or {}
                     info[ip] = {"cc": (j.get("country_code") or "").upper(),
                                 "isp": conn.get("isp") or "", "org": conn.get("org") or "",
-                                "as": str(conn.get("asn") or ""), "reverse": ""}
+                                "as": str(conn.get("asn") or ""), "reverse": "",
+                                "hosting": False, "proxy": False}
                 except Exception:  # noqa: BLE001
-                    info[ip] = {"cc": "", "isp": "", "org": "", "as": "", "reverse": ""}
-    return {srv: info.get(ip) or {"cc": "", "isp": "", "org": "", "as": "", "reverse": ""}
+                    info[ip] = {"cc": "", "isp": "", "org": "", "as": "", "reverse": "",
+                                "hosting": False, "proxy": False}
+    return {srv: info.get(ip) or {"cc": "", "isp": "", "org": "", "as": "", "reverse": "",
+                                  "hosting": False, "proxy": False}
             for srv, ip in ips.items()}
 
 
@@ -1152,6 +1160,10 @@ ASIA = {"HK", "TW", "JP", "SG", "KR", "MO"}
 ASIA_STRICT = {"HK", "TW", "JP", "SG", "KR"}
 # 额度不够时的优先级：亚太 0 > 加拿大 1 > 美国 2 > 其他 3
 REGION_PRIORITY = {"HK": 0, "TW": 0, "JP": 0, "SG": 0, "KR": 0, "CA": 1, "US": 2}
+# 只收这些地区的住宅 IP（用户要求：只要台湾、加拿大的家宽节点）。
+# 实测免费源里的住宅节点 78 个中，7 成是 US/CN/KR/HK —— 这些“别国家宽”对用户没用，
+# 反而会把「🏠 住宅IP优选」组塞满。设成空集合即不过滤（保留全部住宅）。
+RESI_CC = {"TW", "CA"}
 # 从美区机房到各大区入口的“物理下界”（ms）。实测值远低于下界×0.7，说明这个节点
 # 的入口根本不在它声称的地区（多半在美西中转），你连它反而要绕太平洋 —— 直接剔除。
 US_LOWER_BOUND = {"US": 15, "CA": 20, "JP": 110, "KR": 120, "HK": 145, "TW": 150,
@@ -1172,6 +1184,7 @@ DC_KEYWORDS = ("amazon", "aws", "google llc", "google cloud", "microsoft", "azur
                "scaleway", "oracle", "alibaba", "tencent", "huawei", "hostinger",
                "namecheap", "godaddy", "buyvm", "frantech", "cogent", "lumen",
                "level 3", "zayo", "gtt", "tata ", "psychz", "kamatera", "eons",
+               "multacom", "cogentco", "verizon business",
                "hosting", "datacenter", "data center", "dedicated", "vps",
                "colocation", "colocated", "cloud", "server", "idc", "noc",
                "cdn", "proxy", "机房")
@@ -1199,19 +1212,33 @@ RESI_RDNS = ("res.", ".dyn.", "pool-", "pppoe", "dsl-", "cpe-", "customer-",
 
 
 def classify_resi(info):
-    """根据 geolocate 拿到的 isp/org/as/reverse 启发式判断：True=住宅，False=机房，None=未知。"""
+    """根据 geolocate 拿到的标记判断：True=住宅，False=机房，None=未知。
+
+    优先用 ip-api 官方的 `hosting` 布尔标记（它在服务端已经把云厂商/机房的 IP 段标好了），
+    比关键词猜准得多。踩过的坑：
+      - 142.171.x.x 段 isp 写着 “TELUS Communications Inc.”（加拿大居民宽带），
+        但 rDNS 是 `xx-xx-xx-xx-dedicated.multacom.com`、hosting=True —— 是 MULTACOM 机房转售，
+        只按 isp 关键词判会被误判成“加拿大住宅”。
+      - 95.134.130.138 isp 写 “Verizon Business”，但 hosting=False、rDNS 无机房特征 ——
+        这是真的企业线路，不该一律当机房。
+    没有 hosting 标记时（ip-api 失败、走了 ipwho.is 兜底）才退回关键词启发式。
+    """
     if not info:
         return None
+    if info.get("hosting") is True:
+        return False
+    if info.get("proxy") is True:          # 被标成公开代理的，基本都是机房/公开池
+        return False
     isp = str(info.get("isp") or "").lower()
     org_as = " | ".join(str(info.get(k) or "") for k in ("org", "as")).lower()
     rdns = str(info.get("reverse") or "").lower()
     if any(k in isp for k in DC_KEYWORDS):
         return False
+    if any(k in rdns for k in DC_KEYWORDS):     # dedicated./vps/hosting 的 rDNS 比 isp 可信
+        return False
     if any(k in isp for k in RESI_KEYWORDS):
         return True
     if any(k in org_as for k in DC_KEYWORDS):
-        return False
-    if any(k in rdns for k in DC_KEYWORDS):
         return False
     if any(k in rdns for k in RESI_RDNS):
         return True
@@ -1296,7 +1323,7 @@ def load_previous(path, limit=60):
     return out
 
 
-def second_build(candidates, verified, geo, path, regions):
+def second_build(candidates, verified, geo, path, regions, resi_cc=None):
     """第二份“宽口径”订阅：只做“谷歌+YouTube 双通 + 地区筛选”，不限协议、不做并发压测。
 
     用途：对照严格规则到底滤掉了哪些其实能用的 IP。"""
@@ -1321,7 +1348,8 @@ def second_build(candidates, verified, geo, path, regions):
     nodes_delay.clear()
     nodes_delay.update(delay)
     try:
-        items, proxies = build(nodes, geo, path, 0, None, None, write_txt=False)
+        items, proxies = build(nodes, geo, path, 0, None, None, write_txt=False,
+                               resi_cc=resi_cc)
     finally:
         nodes_delay.clear()
         nodes_delay.update(saved)
@@ -1341,17 +1369,23 @@ def second_build(candidates, verified, geo, path, regions):
 
 
 def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, write_txt=True,
-          max_per_region=0, region_cap=None, resi_cap=0, max_resi_total=40):
+          max_per_region=0, region_cap=None, resi_cap=0, max_resi_total=40, resi_cc=None):
     selfhost = selfhost or []
+    resi_cc = resi_cc or set()
     items = []
     for p in nodes:
         nid = p["__id"]
         d = nodes_delay[nid]
         g = geo.get(str(p.get("server")), {})
+        cc_g = (g.get("cc") or "").upper()
+        # 只认 TW/CA 的住宅 IP：免费源里的“别国家宽”（US 29 / CN 27 / KR 8 …）对用户没用，
+        # 一是会把「🏠 住宅IP优选」组塞满，二是它们本来就不是用户要的地区。
+        # 注意不删节点，只是不再按“住宅”给它们加分 —— 普通节点该测该留照旧。
+        is_resi = classify_resi(g) is True and (not resi_cc or cc_g in resi_cc)
         items.append({"node": p, "cc": g.get("cc", ""), "delay": d["delay"], "hits": d["hits"],
                       "tier": p.get("__tier", "full"),
                       "carry": bool(p.get("__carry")),
-                      "resi": classify_resi(g) is True,
+                      "resi": is_resi,
                       "cn": d.get("cn")})
     # 排序优先级：完整验证档 > 住宅 IP > 老选手 > 延迟。
     # 住宅 IP 排在老选手之前（用户明确要求“优先保证住宅 ip”），老选手只压非住宅的新节点，
@@ -1673,6 +1707,9 @@ def main():
                          "额外保留，避免被同地区更快的机房节点挤掉；总量仍受 --max-resi-total 限制")
     ap.add_argument("--max-resi-total", type=int, default=40,
                     help="住宅 IP 节点全局上限（防止住宅节点过多把订阅撑大），默认 40")
+    ap.add_argument("--resi-cc", default="TW,CA",
+                    help="只有这些地区的住宅 IP 会被算作“住宅”（默认 TW,CA）。空字符串=不过滤。"
+                         "免费源里的美/中/韩家宽节点对国内用户没用，还会挤占住宅配额")
     ap.add_argument("--cn-check", dest="cn_check", action="store_true",
                     help="启用 globalping 上海探针实测（**默认关闭**：实测它与真实体验相关性差，"
                          "改用下面的并发压测 + 地区/协议筛选）")
@@ -1854,7 +1891,8 @@ def main():
 
     # ---- 第二份“宽口径”订阅（可选）：只做双站验证 + 地区筛选，不限协议、不压测 ----
     if args.second_out:
-        second_build(candidates, verified, geo, args.second_out, args.second_regions)
+        second_build(candidates, verified, geo, args.second_out, args.second_regions,
+                     resi_cc={c.strip().upper() for c in args.resi_cc.split(",") if c.strip()})
 
     # 协议筛选：实测（上海本机、真实客户端）只有 ss/trojan 还有存活，
     # REALITY 与 ws/CDN 前缀节点通过率 0% —— 机房能通、国内被识别，留着只会给用户超时。
@@ -2151,7 +2189,8 @@ def main():
     items, proxies = build(alive, geo, args.out, args.workers, sh_nodes,
                            args.public_out or None, max_per_region=args.max_per_region,
                            region_cap=region_cap, resi_cap=args.resi_cap,
-                           max_resi_total=args.max_resi_total)
+                           max_resi_total=args.max_resi_total,
+                           resi_cc={c.strip().upper() for c in args.resi_cc.split(",") if c.strip()})
     log("  输出: %s  (免费 %d + 自建 %d)" % (args.out, len(proxies), len(sh_nodes)))
     if args.public_out:
         log("  公开版: %s  (只含免费节点)" % args.public_out)
@@ -2159,7 +2198,8 @@ def main():
     from collections import Counter
     log("  地区: %s" % dict(Counter(it["cc"] or "??" for it in items).most_common(10)))
     n_resi = sum(1 for it in items if it.get("resi"))
-    log("  住宅 IP: %d 个（家宽 ISP 启发式判定，已优先排列，见「🏠 住宅IP优选」组）" % n_resi)
+    log("  住宅 IP: %d 个（只认 %s 的家宽 ISP，已优先排列，见「🏠 住宅IP优选」组）"
+        % (n_resi, "/".join(sorted({c.strip().upper() for c in args.resi_cc.split(",") if c.strip()})) or "全部"))
 
     # 把这一轮的“漏斗”落成文件，方便事后判断是“节点质量差”还是“我们没测全”
     stats = {
