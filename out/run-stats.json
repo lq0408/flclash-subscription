@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-11-26 04:51:50 +0000",
-  "candidates": 5512,
-  "prefilter_alive": 1766,
-  "verified_both_ok": 626,
-  "verified_ngem": 355,
-  "residential_selected": 7,
-  "verified_dead": 287,
+  "generated_at": "2026-11-26 07:03:58 +0000",
+  "candidates": 5464,
+  "prefilter_alive": 1606,
+  "verified_both_ok": 521,
+  "verified_ngem": 327,
+  "residential_selected": 0,
+  "verified_dead": 294,
   "carry_loaded": 60,
   "cn_probe": {
     "enabled": false,
@@ -19,5 +19,5 @@
     "gate_ms": 120
   },
   "coverage": null,
-  "final": 226
+  "final": 173
 }
