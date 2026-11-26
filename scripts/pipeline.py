@@ -799,7 +799,7 @@ def _stress_chunk(exe, chunk, workdir, workers, burst, timeout_ms, min_ok_ratio,
                 res = [f.result() for f in futs]
             good = [ms for ok2, _c, ms, _e in res if ok2]
             good.sort()
-            need_ok = max(1, burst // 2) if is_prot else max(1, int(burst * min_ok_ratio))
+            need_ok = max(1, int(burst * min_ok_ratio))
             if len(good) < need_ok:
                 return {"ok": len(good), "n": burst, "p50": good[len(good) // 2] if good else None,
                         "p95": None, "jitter": (good[-1] - good[0]) if good else None,
@@ -807,7 +807,8 @@ def _stress_chunk(exe, chunk, workdir, workers, burst, timeout_ms, min_ok_ratio,
             p50 = good[len(good) // 2]
             p95 = good[max(0, int(len(good) * 0.95) - 1)]
             jitter = good[-1] - good[0]
-            if not is_prot and jitter > jitter_ms:
+            max_jit = (jitter_ms + 150) if is_prot else jitter_ms
+            if jitter > max_jit:
                 return {"ok": len(good), "n": burst, "p50": p50, "p95": p95,
                         "jitter": jitter, "speed_kbps": 0, "pass": False}
             # 仅在显式配置 --min-speed > 0 时才做下载测速（避免美国机房单线程测速误杀国内好用的 CDN/TLS 节点）
@@ -965,7 +966,7 @@ def _gp_ms(res, target_ips=None):
             addr = str(h.get("resolvedAddress") or "")
             if addr and addr in target_ips:
                 st = h.get("stats") or {}
-                if st.get("avg") is not None and float(st.get("loss") or 0) < 100:
+                if st.get("avg") is not None and float(st.get("loss") or 0) <= 34:
                     return float(st["avg"])
         if hops:
             continue          # 有 hops 但里面没有目标 = 没连上，别用中间路由器的数字
@@ -1083,14 +1084,9 @@ def cn_probe_proxy(p, city, timeout_s=90):
 
 
 def cn_probe(target, port, city, timeout_s=90):
-    """从 city 探针量一次 target 的 RTT。
-
-    先 ping（1 次额度、ICMP 回包就是网络 RTT）；ping 不通（很多 VPS 屏蔽 ICMP）再用
-    mtr-TCP 打节点端口。这样正常情况下每个节点只花 1 次额度。返回 (ms, 说明)。"""
+    """从 city 探针用 TCP mtr 直接打节点实际端口，1 次额度即可测出国内真实可达性与 RTT。"""
     target_ips = _resolve_ips(target)
-    plan = [("ping", {"type": "ping", "target": target, "locations": [city],
-                      "measurementOptions": {"packets": 3}, "limit": 1}),
-            ("mtr", {"type": "mtr", "target": target, "locations": [city],
+    plan = [("mtr", {"type": "mtr", "target": target, "locations": [city],
                      "measurementOptions": {"protocol": "TCP", "port": int(port)}, "limit": 1})]
     for kind, payload in plan:
         if _gp_budget["remaining"] <= 1:
@@ -1148,15 +1144,21 @@ def _round_robin_by_cc(nodes, geo):
 def cn_probe_nodes(nodes, geo, cities, workers, timeout_s, budget):
     """并发从国内探针量每个节点：返回 {(server, port): (ms|null, 说明)}
 
-    顺序：老节点 → 调用方给的顺序（main 已按「亚太 > 加拿大 > 美国 > 其他」排好）。
-    额度不够时，后面那些（比如美国）自然被截掉，保证优先级高的先测。"""
+    先按 (server, port) 去重再按国家轮询排布，确保有限预算均匀覆盖 TW/CA/US 且不重复浪费额度。"""
     _gp_budget["remaining"] = budget
-    carry = [p for p in nodes if p.get("__carry")]
-    rest = [p for p in nodes if not p.get("__carry")]
+    dedup_ep, seen_ep = [], set()
+    for p in nodes:
+        ep = (str(p.get("server")), int(p.get("port") or 443))
+        if ep in seen_ep:
+            continue
+        seen_ep.add(ep)
+        dedup_ep.append(p)
+    carry = [p for p in dedup_ep if p.get("__carry")]
+    rest = _round_robin_by_cc([p for p in dedup_ep if not p.get("__carry")], geo)
     todo = (carry + rest)[:budget]
-    if len(todo) < len(nodes):
-        log("  预算 %d 个：先量老节点 %d 个，按优先级截取到 %d 个（共 %d 个候选）"
-            % (budget, len(carry), len(todo), len(nodes)))
+    if len(todo) < len(dedup_ep):
+        log("  预算 %d 个：去重后 %d 个端点，先量老节点 %d 个，轮询截取 %d 个"
+            % (budget, len(dedup_ep), len(carry), len(todo)))
     out, done = {}, 0
     t0 = time.time()
 
@@ -1399,7 +1401,7 @@ def load_previous(path, limit=60, exclude_types=None):
         t = str(p.get("type") or "").lower()
         if t not in ALLOWED_TYPES or t in exclude_types or not p.get("server") or not p.get("port"):
             continue
-        if "http-plain" in exclude_types and t == "http" and not p.get("tls"):
+        if "http-plain" in exclude_types and t == "http" and (not p.get("tls") or int(p.get("port") or 0) != 443):
             continue
         nm = str(p.get("name") or "")
         m = re.search(r"·\s*(\d+)ms", nm)
@@ -1458,14 +1460,22 @@ def second_build(candidates, verified, geo, path, regions, resi_cc=None):
     return path
 
 
+def _is_cdn_server(srv):
+    s = str(srv or "").lower().strip()
+    return s.startswith(("172.64.", "172.67.", "104.16.", "104.17.", "104.18.", "104.19.",
+                         "104.20.", "104.21.", "104.22.", "104.24.", "104.25.", "104.26.",
+                         "104.27.", "162.159.", "188.114.")) or "cloudflare" in s
+
+
 def china_proto_penalty(p):
-    """对国内友好度打分（返回附加延迟惩罚 ms）：TLS/QUIC 协议优先，裸 SS/SSR/明文 TCP 降权。"""
+    """对国内友好度打分（返回附加延迟惩罚 ms）：TCP TLS 优先，UDP/QUIC 次之，裸 SS/明文 TCP 降权。"""
     t = str(p.get("type") or "").lower()
-    if t in ("vless", "trojan", "hysteria2", "hysteria", "tuic", "anytls", "wireguard",
-             "snell", "ssh", "mieru"):
+    if t in ("vless", "trojan", "anytls", "snell", "ssh", "mieru"):
         return 0
+    if t in ("hysteria2", "hysteria", "tuic", "wireguard"):
+        return 60
     if t == "http" and p.get("tls"):
-        return 0
+        return 120
     if t == "vmess":
         net = str(p.get("network") or "tcp").lower()
         if p.get("tls") or net in ("ws", "grpc", "h2", "httpupgrade", "xhttp"):
@@ -1491,9 +1501,10 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
         jitter_ms = int(d.get("jitter") or 0)
         gemini_ms = int(d.get("gemini_ms") or 0)
         proto_pen = china_proto_penalty(p)
-        # 综合质量分（越低越好）：Google 延迟 + Gemini 延迟权重 + 抖动惩罚 + 协议国内友好度惩罚 - 带宽加分
+        resi_bonus = 150 if (is_resi and cc_g == "TW") else 0
+        # 综合质量分（越低越好）：延迟 + Gemini 延迟权重 + 抖动惩罚 + 协议惩罚 - 台湾住宅/带宽加分
         qscore = max(1, int(d["delay"]) + (gemini_ms // 3 if gemini_ms else 0)
-                     + min(200, jitter_ms // 2) + proto_pen - min(80, speed_kbps // 25))
+                     + min(200, jitter_ms // 2) + proto_pen - resi_bonus - min(80, speed_kbps // 25))
         gem_rank = 0 if (is_resi and cc_g == "TW") else (0 if d.get("gemini") else 1)
         items.append({"node": p, "cc": g.get("cc", ""), "delay": d["delay"], "hits": d["hits"],
                       "tier": p.get("__tier", "full"),
@@ -1508,29 +1519,42 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
                       "gemini_ms": gemini_ms,
                       "ip": g.get("ip") or str(p.get("server")),
                       "cn": d.get("cn")})
-    # 排序优先级：验证档 > 台湾住宅(0)/其余住宅(1)/普通(2) > Gemini可用 > 综合质量分 > 老选手
+    # 排序优先级：验证档 > 国内实测已通 > Gemini可用 > 综合质量分 > 老选手
     items.sort(key=lambda x: (TIER_RANK.get(x["tier"], 3),
-                              x["resi_rank"],
+                              0 if x.get("cn") else 1,
                               x["gem_rank"],
                               x["qscore"],
                               0 if x["carry"] else 1,
                               -x["hits"]))
 
-    # 同 IP 上限（仅在显式传 --max-per-ip > 0 时启用；默认关闭以免误杀共享 Cloudflare CDN 入口的不同后端节点）
-    if max_per_ip > 0:
-        deduped, ip_cnt = [], {}
-        for it in items:
-            ip = str(it["ip"] or "").lower().strip()
-            is_tw_resi = it["resi"] and it["cc"] == "TW"
-            if not is_tw_resi and ip:
-                ip_cnt[ip] = ip_cnt.get(ip, 0) + 1
-                if ip_cnt[ip] > max_per_ip:
-                    continue
-            deduped.append(it)
-        if len(deduped) < len(items):
-            log("  同IP限额（≤%d）: 剔除 %d 个，%d → %d"
-                % (max_per_ip, len(items) - len(deduped), len(items), len(deduped)))
-        items = deduped
+    # 智能去重：直连节点按 (server, port) 只留最优 1 条，消除同一机器多克隆刷屏；
+    # 共享 Cloudflare/CDN 边缘 IP 允许按 (server, port, host/sni) 保留不同后端。
+    deduped, seen_ep, ip_cnt = [], set(), {}
+    for it in items:
+        p = it["node"]
+        srv = str(p.get("server") or "").lower().strip()
+        port = int(p.get("port") or 0)
+        if _is_cdn_server(srv) or str(p.get("network") or "").lower() == "ws":
+            ws = p.get("ws-opts") if isinstance(p.get("ws-opts"), dict) else {}
+            host_sni = str(p.get("servername") or p.get("sni")
+                           or (ws.get("headers") or {}).get("Host") or "").lower().strip()
+            ep_key = (srv, port, host_sni)
+        else:
+            ep_key = (srv, port)
+        if ep_key in seen_ep:
+            continue
+        seen_ep.add(ep_key)
+        ip = str(it["ip"] or "").lower().strip()
+        is_tw_resi = it["resi"] and it["cc"] == "TW"
+        if max_per_ip > 0 and not is_tw_resi and ip:
+            ip_cnt[ip] = ip_cnt.get(ip, 0) + 1
+            if ip_cnt[ip] > max_per_ip:
+                continue
+        deduped.append(it)
+    if len(deduped) < len(items):
+        log("  智能去重: 剔除 %d 个重复直连克隆，%d → %d"
+            % (len(items) - len(deduped), len(items), len(deduped)))
+    items = deduped
 
     # 每地区只留最快的 N 个（region_cap 按地区覆盖，resi_cap 额外保底台湾/加拿大住宅 IP）
     region_cap = region_cap or {}
@@ -1988,7 +2012,7 @@ def main():
         got = 0
         for p in normalize(doc["proxies"], src):
             t_p = str(p.get("type") or "").lower()
-            if exclude_types and (t_p in exclude_types or ("http-plain" in exclude_types and t_p == "http" and not p.get("tls"))):
+            if exclude_types and (t_p in exclude_types or ("http-plain" in exclude_types and t_p == "http" and (not p.get("tls") or int(p.get("port") or 0) != 443))):
                 continue
             k = dedupe_key(p)
             if k in seen:
@@ -2210,7 +2234,7 @@ def main():
             地区/协议筛选后池子可能只有 2~3 个，拿候选数当基准会永远判失败。"""
             hits = sorted(v[0] for v in data.values() if v[0])
             why = _Counter(v[1] for v in data.values() if not v[0])
-            unreach = why.get("连不上/无回包", 0)
+            unreach = why.get("连不上/无回包", 0) + why.get("SNI/TLS 阻断", 0)
             infra = why.get("额度用尽", 0) + why.get("限流 429", 0)
             definite = len(hits) + unreach
             attempts = len(data)
@@ -2220,7 +2244,8 @@ def main():
             return hits, unreach, infra, definite, ok
 
         def _run():
-            return cn_probe_nodes(probe_pool, geo, [{"city": args.cn_city, "country": "CN"}],
+            loc = [{"country": "CN"}] if args.cn_city.strip().upper() in ("", "CN", "ALL") else [{"city": args.cn_city, "country": "CN"}]
+            return cn_probe_nodes(probe_pool, geo, loc,
                                   args.cn_workers, 90, args.cn_max_nodes)
 
         cn_data = _run()
