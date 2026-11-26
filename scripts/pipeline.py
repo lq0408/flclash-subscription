@@ -352,13 +352,16 @@ def yaml_emit(lines, obj, indent):
     pad = "  " * indent
     if isinstance(obj, dict):
         for k, v in obj.items():
+            ks = str(k)
+            if ks == "" or any(ord(c) < 32 or 0x7f <= ord(c) <= 0x9f or c in ":#{}[],&*?|<>=!%@`'\"" for c in ks):
+                ks = yaml_scalar(ks)
             if isinstance(v, (dict, list)) and v:
-                lines.append("%s%s:" % (pad, k))
+                lines.append("%s%s:" % (pad, ks))
                 yaml_emit(lines, v, indent + 1)
             elif isinstance(v, (dict, list)):
-                lines.append("%s%s: {}" % (pad, k) if isinstance(v, dict) else "%s%s: []" % (pad, k))
+                lines.append("%s%s: {}" % (pad, ks) if isinstance(v, dict) else "%s%s: []" % (pad, ks))
             else:
-                lines.append("%s%s: %s" % (pad, k, yaml_scalar(v)))
+                lines.append("%s%s: %s" % (pad, ks, yaml_scalar(v)))
     elif isinstance(obj, list):
         for v in obj:
             if isinstance(v, dict):
@@ -372,11 +375,15 @@ def yaml_emit(lines, obj, indent):
 
 
 def yaml_scalar(v):
+    if v is None:
+        return "null"
     if isinstance(v, bool):
         return "true" if v else "false"
     if isinstance(v, (int, float)):
         return str(v)
     s = str(v)
+    if any(ord(c) < 32 or 0x7f <= ord(c) <= 0x9f for c in s):
+        return json.dumps(s, ensure_ascii=True)
     if s == "" or any(c in s for c in ":#{}[],&*?|<>=!%@`'\"") or s.strip() != s or s.lower() in (
             "true", "false", "null", "yes", "no", "on", "off", "~"):
         return json.dumps(s, ensure_ascii=False)
