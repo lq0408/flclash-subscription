@@ -65,33 +65,22 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) clash/mihomo"}
 #     shaoyouvip/free、mfuu/FreeProxies、ripaojiedian/freenode
 #     （ripaojiedian / shaoyouvip 的日韩港占比 42%~50%，是典型的“日韩港垃圾源”）
 SOURCES = [
-    # 原始 10 个国内实测可用率最高的公开节点源（全部恢复）
-    ("ermaozi/get_subscribe", "main", "subscribe/clash.yml"),
-    ("ermaozi01/free_clash_vpn", "main", "subscribe/clash.yml"),
+    # 精简后的 8 个高产、对国内友好、含美/加/台优质节点的 GitHub 源
     ("anaer/Sub", "main", "clash.yaml"),
-    ("ripaojiedian/freenode", "main", "clash"),
-    ("peasoft/NoMoreWalls", "master", "list.yml"),
-    ("mahdibland/ShadowsocksAggregator", "master", "Eternity.yml"),
+    ("Barabama/FreeNodes", "main", "nodes/merged.yaml"),
+    ("Au1rxx/free-vpn-subscriptions", "main", "output/clash.yaml"),
     ("cysk003/freeSub", "main", "clash.yaml"),
     ("ts-sf/fly", "main", "clash"),
-    ("free18/v2ray", "main", "c.yaml"),
-    ("chengaopan/AutoMergePublicNodes", "master", "list.yml"),
-    # 补充：台湾住宅 IP 与高活跃聚合源
-    ("Barabama/FreeNodes", "main", "nodes/merged.yaml"),
-    ("yy1588133/proxy-pool", "main", "clash.yaml"),
-    ("snakem982/proxypool", "main", "source/clash-meta-2.yaml"),
+    ("ermaozi/get_subscribe", "main", "subscribe/clash.yml"),
     ("share-daily/node", "main", "clash.yaml"),
+    ("yy1588133/proxy-pool", "main", "clash.yaml"),
 ]
 
 # 非 GitHub 的每日源站：路径里的 {Y}/{M}/{D} 由 _daily_dates() 按北京日期填充。
 # freeclashnode 和 clashnode 其实是同一家（内容一致），互为备用，重复节点后面会去重。
-# nodefree / v2rayshare 在国内网络会被 TLS 重置（本机实测连不上），但 CI 在美国，通常能抓到；
-# 抓不到时只会多打一行 [skip]，不影响整体。
 EXTRA_SOURCES = [
     ("freeclashnode.com", "https://freeclashnode.com/uploads/{Y}/{M}/0-{D}.yaml"),
     ("clashnode.me", "https://clashnode.me/uploads/{Y}/{M}/0-{D}.yaml"),
-    ("nodefree.org", "https://nodefree.org/dy/{Y}/{M}/{D}.yaml"),
-    ("v2rayshare.com", "https://v2rayshare.com/uploads/{Y}/{M}/0-{D}.yaml"),
 ]
 
 ALLOWED_TYPES = {"ss", "ssr", "vmess", "vless", "trojan", "hysteria", "hysteria2", "tuic",
@@ -1462,6 +1451,21 @@ def second_build(candidates, verified, geo, path, regions, resi_cc=None):
     return path
 
 
+def china_proto_penalty(p):
+    """对国内友好度打分（返回附加延迟惩罚 ms）：TLS/QUIC 协议优先，裸 SS/SSR/明文 TCP 降权。"""
+    t = str(p.get("type") or "").lower()
+    if t in ("vless", "trojan", "hysteria2", "hysteria", "tuic", "anytls", "wireguard",
+             "snell", "ssh", "mieru"):
+        return 0
+    if t == "http" and p.get("tls"):
+        return 0
+    if t == "vmess":
+        net = str(p.get("network") or "tcp").lower()
+        if p.get("tls") or net in ("ws", "grpc", "h2", "httpupgrade", "xhttp"):
+            return 0
+    return 180
+
+
 def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, write_txt=True,
           max_per_region=0, region_cap=None, resi_cap=0, max_resi_total=40, resi_cc=None,
           max_per_ip=0):
@@ -1478,23 +1482,29 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
         resi_rank = 0 if (is_resi and cc_g == "TW") else (1 if is_resi else 2)
         speed_kbps = int(d.get("speed") or 0)
         jitter_ms = int(d.get("jitter") or 0)
-        # 综合质量分（越低越好）：基础延迟 + 抖动惩罚 - 带宽加分
-        qscore = max(1, int(d["delay"]) + min(200, jitter_ms // 2) - min(80, speed_kbps // 25))
+        gemini_ms = int(d.get("gemini_ms") or 0)
+        proto_pen = china_proto_penalty(p)
+        # 综合质量分（越低越好）：Google 延迟 + Gemini 延迟权重 + 抖动惩罚 + 协议国内友好度惩罚 - 带宽加分
+        qscore = max(1, int(d["delay"]) + (gemini_ms // 3 if gemini_ms else 0)
+                     + min(200, jitter_ms // 2) + proto_pen - min(80, speed_kbps // 25))
+        gem_rank = 0 if (is_resi and cc_g == "TW") else (0 if d.get("gemini") else 1)
         items.append({"node": p, "cc": g.get("cc", ""), "delay": d["delay"], "hits": d["hits"],
                       "tier": p.get("__tier", "full"),
                       "carry": bool(p.get("__carry")),
                       "resi": is_resi,
                       "resi_rank": resi_rank,
+                      "gem_rank": gem_rank,
                       "speed": speed_kbps,
                       "jitter": jitter_ms,
                       "qscore": qscore,
                       "gemini": bool(d.get("gemini")),
+                      "gemini_ms": gemini_ms,
                       "ip": g.get("ip") or str(p.get("server")),
                       "cn": d.get("cn")})
-    # 排序优先级：验证档 > 台湾住宅(0)/其余住宅(1)/普通(2) > 综合质量分(延迟+抖动-带宽) > 老选手(仅作同分决胜)。
-    # 彻底修复“老慢节点排在 49ms 新节点前面”的倒挂问题。
+    # 排序优先级：验证档 > 台湾住宅(0)/其余住宅(1)/普通(2) > Gemini可用 > 综合质量分 > 老选手
     items.sort(key=lambda x: (TIER_RANK.get(x["tier"], 3),
                               x["resi_rank"],
+                              x["gem_rank"],
                               x["qscore"],
                               0 if x["carry"] else 1,
                               -x["hits"]))
@@ -1563,7 +1573,7 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
     fast_sorted = sorted(primary_items or items, key=lambda x: (x["qscore"], 0 if x["carry"] else 1))
     main_pool = [it["name"] for it in fast_sorted]
     resi_names = [it["name"] for it in items if it.get("resi")]
-    gemini_names = [it["name"] for it in sorted(items, key=lambda x: (x["resi_rank"], x["qscore"]))
+    gemini_names = [it["name"] for it in sorted(items, key=lambda x: (x["resi_rank"], x["gemini_ms"] or x["qscore"], x["qscore"]))
                     if it.get("gemini")]
     all_names = [it["name"] for it in items]
     # 没通过完整验证的（延迟超标 / YouTube 不通）只在带 --keep-* 时才会存在，单独分组收纳
@@ -1644,14 +1654,14 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
             groups.append({"name": "🔀 智能切换", "type": "fallback", "url": check_url,
                            "interval": 300, "proxies": ["🏠 自建节点", "♻️ 自动选择"]})
         select_list = (["🔀 智能切换"] if sh else []) + (["🏠 自建节点"] if sh else []) \
-            + ["♻️ 自动选择"] + (["🏠 住宅IP优选"] if resi_names else []) \
-            + order + ["🔯 故障转移"] + (["🤖 Gemini优选"] if gemini_names else []) \
-            + ["🎯 全球直连"] \
+            + ["♻️ 自动选择"] + (["🤖 Gemini优选"] if gemini_names else []) \
+            + (["🏠 住宅IP优选"] if resi_names else []) \
+            + order + ["🔯 故障转移", "🎯 全球直连"] \
             + [lbl for _, lbl, _ in extra] \
             + sh_names + all_names
         groups.insert(0, {"name": "🚀 节点选择", "type": "select", "proxies": select_list})
         groups.append({"name": "♻️ 自动选择", "type": "url-test", "url": check_url,
-                       "interval": 300, "tolerance": 50, "lazy": False, "proxies": main_pool})
+                       "interval": 180, "tolerance": 30, "lazy": False, "proxies": main_pool})
         # 故障转移优先用高可用低延迟的优胜节点（主要为 TW/CA/US 及快 SG/JP）
         fb_names = [it["name"] for it in fast_sorted if it["cc"] in ("TW", "CA", "US", "SG", "JP")]
         groups.append({"name": "🔯 故障转移", "type": "fallback", "url": check_url,
@@ -1659,14 +1669,14 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
         if resi_names:
             # 住宅 IP 专用 url-test 组：台湾住宅排在最前
             groups.append({"name": "🏠 住宅IP优选", "type": "url-test", "url": check_url,
-                           "interval": 300, "tolerance": 50, "lazy": False,
+                           "interval": 180, "tolerance": 30, "lazy": False,
                            "proxies": resi_names})
         if gemini_names:
             groups.append({"name": "🤖 Gemini优选", "type": "url-test", "url": check_url,
-                           "interval": 300, "tolerance": 50, "proxies": gemini_names})
+                           "interval": 180, "tolerance": 30, "proxies": gemini_names})
         for lbl in order:
             groups.append({"name": lbl, "type": "url-test", "url": check_url,
-                           "interval": 300, "tolerance": 50, "proxies": regions[lbl]})
+                           "interval": 180, "tolerance": 30, "proxies": regions[lbl]})
         groups.append({"name": "🎯 全球直连", "type": "select", "proxies": ["DIRECT"]})
         groups.append({"name": "🛑 广告拦截", "type": "select", "proxies": ["REJECT", "DIRECT"]})
         for _, lbl, names in extra:
@@ -1695,10 +1705,11 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
     def write_nodes_txt(path):
         stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime())
         txt_path = os.path.join(os.path.dirname(os.path.abspath(path)), "nodes.txt")
-        rows = ["# 免费节点清单  " + stamp, "# 序号 | 地区 | 协议 | 服务器:端口 | 延迟(ms) | 带宽(KB/s)", ""]
+        rows = ["# 免费节点清单  " + stamp, "# 序号 | 地区 | 协议 | 服务器:端口 | 延迟(ms) | Gemini(ms)", ""]
         for i, (p, it) in enumerate(zip(proxies, items), 1):
-            rows.append("%3d | %-2s | %-9s | %s:%s | %d | %d" % (
-                i, it["cc"] or "??", p["type"], p["server"], p["port"], it["delay"], it.get("speed", 0)))
+            gm = str(it["gemini_ms"]) if it.get("gemini_ms") else "-"
+            rows.append("%3d | %-2s | %-9s | %s:%s | %d | %s" % (
+                i, it["cc"] or "??", p["type"], p["server"], p["port"], it["delay"], gm))
         with open(txt_path, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(rows) + "\n")
 
@@ -1817,6 +1828,8 @@ def main():
                     help="另存一份宽口径订阅（只做双站验证 + 地区筛选，不限协议、不压测），用于对照")
     ap.add_argument("--second-regions", default="HK,TW,JP,KR,SG,CA",
                     help="宽口径订阅保留的地区，默认 HK,TW,JP,KR,SG,CA")
+    ap.add_argument("--regions", default="",
+                    help="只保留这些国家/地区（如 US,CA,TW）；设置后在初筛后即刻按归属地剔除其余国家，大幅提速")
     ap.add_argument("--max-per-region", type=int, default=0,
                     help="主订阅每个地区最多保留 N 个最快的节点（carry 老选手同样占额度），0=不限制。"
                          "聚合源里美国/未知地区动辄几百个且国内大多超时，建议 50")
@@ -2014,6 +2027,23 @@ def main():
         return 1
     candidates = [p for p in merged if p["__id"] in quick]
 
+    geo = None
+    want_regions = {c.strip().upper() for c in args.regions.split(",") if c.strip()}
+    if want_regions:
+        log("[5.5/9] 提前查询归属地并只保留 %s" % "/".join(sorted(want_regions)))
+        t_geo = time.time()
+        geo = geolocate([str(p.get("server")) for p in candidates])
+        before_n = len(candidates)
+        candidates = [p for p in candidates
+                      if (geo.get(str(p.get("server")), {}).get("cc") or "").upper() in want_regions]
+        log("  地区预筛（%s）: %d → %d（剔除 %d 个非目标地区节点，用时 %.1fs）"
+            % ("/".join(sorted(want_regions)), before_n, len(candidates), before_n - len(candidates),
+               time.time() - t_geo))
+        if len(candidates) < args.min_nodes:
+            log("目标地区可用节点过少，退出")
+            annotate("目标地区 %s 初筛可用节点只有 %d 个" % ("/".join(sorted(want_regions)), len(candidates)))
+            return 1
+
     log("[6/9] 严格验证：谷歌 + YouTube%s 可达性（%d 轮，机房延迟门槛 %dms）" %
         (" + Gemini" if args.require_gemini else "", args.verify_rounds, args.max_delay))
     min_hits = args.min_hits or args.verify_rounds
@@ -2031,11 +2061,14 @@ def main():
         annotate("严格验证无法进行：%s" % vstat["fatal"])
         return 1
 
-    log("[7/9] 查询归属地（先查，因为亚太门槛和探针挑样都要看国家）")
-    t_geo = time.time()
-    geo = geolocate([str(p.get("server")) for p in candidates])
-    log("  已知归属: %d / %d（用时 %.1fs）" % (sum(1 for v in geo.values() if v["cc"]), len(geo),
-                                        time.time() - t_geo))
+    if geo is None:
+        log("[7/9] 查询归属地（先查，因为亚太门槛和探针挑样都要看国家）")
+        t_geo = time.time()
+        geo = geolocate([str(p.get("server")) for p in candidates])
+        log("  已知归属: %d / %d（用时 %.1fs）" % (sum(1 for v in geo.values() if v["cc"]), len(geo),
+                                            time.time() - t_geo))
+    else:
+        log("[7/9] 归属地已在第 5.5 步查询完毕，跳过重复查询")
 
     # ---- 第二份“宽口径”订阅（可选）：只做双站验证 + 地区筛选，不限协议、不压测 ----
     if args.second_out:
@@ -2374,9 +2407,10 @@ def main():
     if not args.require_gemini and alive:
         gem = probe_gemini_batch(exe, alive, work, min(args.workers, 64), args.verify_timeout)
         gem_ok = 0
-        for pid, (ok_m, _ms) in gem.items():
+        for pid, (ok_m, m_ms) in gem.items():
             if pid in nodes_delay:
                 nodes_delay[pid]["gemini"] = bool(ok_m)
+                nodes_delay[pid]["gemini_ms"] = int(m_ms or 0)
                 if ok_m:
                     gem_ok += 1
         log("  Gemini 专项探测: %d / %d 个可用（已归入「🤖 Gemini优选」组）" % (gem_ok, len(alive)))

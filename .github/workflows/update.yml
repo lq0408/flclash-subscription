@@ -64,23 +64,18 @@ jobs:
           else
             OUT_ARGS="--out out/flclash-free-nodes.yaml"
           fi
-          # 策略（恢复最初国内实测可用率最高的 10 个核心源 + 4 个补充源，取消美国侧过严过滤）：
-          # - 仅排除明文无 TLS 的 http 开放代理与 socks5（保留 HTTPS-443 代理，如实测 61ms 的 172.64.x.x:443）
-          # - 恢复原始 --max-delay 3000 / --burst-jitter 300，关闭美国侧 --min-speed / --na-max-delay / --max-per-ip，
-          #   避免 GitHub 美国机房的延迟/带宽指标误杀实际国内可用的 Trojan/VLESS/CDN/加拿大节点
-          # - 台湾住宅 IP 独立保护（放宽并发、优先排序、--resi-cap 5 保底）
-          # - Gemini 移至压测后单测并归入「🤖 Gemini优选」，不误杀正常节点
-          # - 地区配额优先保障 台湾/加拿大/美国，适当降低日韩港新权重
+          # 极致精简策略：仅保留 美/加/台 各最多 50 个（其余国家全部早期剔除），国内友好协议 + Google/Gemini 综合速度优先
           python -u scripts/pipeline.py --workers 128 --rounds 2 --timeout 3000 \
+            --regions "US,CA,TW" \
             --cn-types "" --exclude-types "http-plain,socks5" \
-            --cn-region asia_na --max-delay 3000 \
-            --max-per-region 30 \
-            --region-cap "TW=100,CA=100,US=120,SG=20,JP=15,HK=10,KR=10" \
+            --cn-region all --max-delay 3000 \
+            --max-per-region 50 \
+            --region-cap "US=50,CA=50,TW=50" \
             --resi-cap 5 --max-resi-total 40 --resi-cc "TW,CA" \
             --burst 6 --burst-min-ok 0.8 --burst-jitter 300 \
             --min-nodes 3 \
             --second-out out/flclash-broad.yaml \
-            --second-regions TW,CA,HK,JP,KR,SG $OUT_ARGS 2>&1 | tee pipeline.log
+            --second-regions US,CA,TW $OUT_ARGS 2>&1 | tee pipeline.log
 
       # 合并版含密钥，只推到私有 Gist；公开仓库里永远只有免费节点
       - name: 发布合并订阅到私有 Gist（可选）
