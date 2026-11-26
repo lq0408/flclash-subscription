@@ -72,12 +72,12 @@ SOURCES = [
     ("Barabama/FreeNodes", "main", "nodes/merged.yaml"),
     # 住宅 IP 密度最高的源之一（9 个住宅 / 137 条），且能补 TW
     ("yy1588133/proxy-pool", "main", "clash.yaml"),
-    # 加拿大/美国补充：longyang 每日 01:00 实测筛选
-    ("longyang1233/free-nodes-sub", "main", "clash.yaml"),
     # 体量不大但独立贡献 52 条，且日韩港占比只有 6%
     ("snakem982/proxypool", "main", "source/clash-meta-2.yaml"),
     # 独立住宅密度不高（3/344），但去重后仍能补 1 个中华电信 TW 家宽，留着兜底
     ("ermaozi/get_subscribe", "main", "subscribe/clash.yml"),
+    # 补充台湾 anytls 节点（其余 http 开放代理会被 --exclude-types 过滤）
+    ("share-daily/node", "main", "clash.yaml"),
 ]
 
 # 非 GitHub 的每日源站：路径里的 {Y}/{M}/{D} 由 _daily_dates() 按北京日期填充。
@@ -89,9 +89,6 @@ EXTRA_SOURCES = [
     ("clashnode.me", "https://clashnode.me/uploads/{Y}/{M}/0-{D}.yaml"),
     ("nodefree.org", "https://nodefree.org/dy/{Y}/{M}/{D}.yaml"),
     ("v2rayshare.com", "https://v2rayshare.com/uploads/{Y}/{M}/0-{D}.yaml"),
-    # clashfreenode.com 的 GitHub 仓库每日发 feed/clash-{YYYYMMDD}.yaml（{D} 即 YYYYMMDD）：
-    # 单文件 1MB+ 约 2000 节点，美国 500+ / 加拿大 30+，是美加节点的主力源
-    ("clashfreenode.com", "https://raw.githubusercontent.com/clashfreenodecom/clashfreenode.com/main/feed/clash-{D}.yaml"),
 ]
 
 ALLOWED_TYPES = {"ss", "ssr", "vmess", "vless", "trojan", "hysteria", "hysteria2", "tuic",
@@ -536,10 +533,12 @@ def measure(exe, proxies, workdir, workers, rounds, timeout_ms, test_url):
 
 
 # ---------------------------------------------------------------- 4. 严格验证
-# 唯一的下发标准：谷歌、YouTube 和 Gemini 都真能打开，且延迟不超过门槛。
+# 下发标准：谷歌 + YouTube 都能真打开，且延迟/并发/带宽达标；Gemini 在压测后单测并归入「🤖 Gemini优选」组。
 GOOGLE_URL = "https://www.google.com/generate_204"
 YOUTUBE_URL = "https://www.youtube.com/"
 GEMINI_URL = "https://gemini.google.com/"
+SPEED_URL = "https://ajax.googleapis.com/ajax/libs/threejs/r84/three.min.js"
+SPEED_BYTES = 200 * 1024
 
 
 def _median(vals):
@@ -618,8 +617,8 @@ def http_probe(port, site, timeout_ms):
         return False, None, int((time.time() - t0) * 1000), str(e)[:80]
 
 
-def probe_one_node(port, rounds, timeout_ms):
-    """一个节点测三个站（顺序执行，避免自己抢自己的带宽把延迟测虚高）"""
+def probe_one_node(port, rounds, timeout_ms, check_gemini=False):
+    """一个节点测谷歌+YouTube（可选再测 Gemini），顺序执行避免自己抢自己的带宽"""
     g, y, m, g_err, y_err, m_err = [], [], [], "", "", ""
     for _ in range(max(1, rounds)):
         ok, code, ms, err = http_probe(port, "google", timeout_ms)
@@ -633,13 +632,73 @@ def probe_one_node(port, rounds, timeout_ms):
             y.append(ms)
         else:
             y_err = err
-    for _ in range(max(1, rounds)):
-        ok, code, ms, err = http_probe(port, "gemini", timeout_ms)
-        if ok:
-            m.append(ms)
-        else:
-            m_err = err
+    if check_gemini:
+        for _ in range(max(1, rounds)):
+            ok, code, ms, err = http_probe(port, "gemini", timeout_ms)
+            if ok:
+                m.append(ms)
+            else:
+                m_err = err
     return _median(g), len(g), g_err, _median(y), len(y), y_err, _median(m), len(m), m_err
+
+
+def download_probe(port, timeout_ms=5000):
+    """通过代理真实下载约 200KB 非 Cloudflare 静态资源，返回 (ok, speed_kbps, got_bytes, ms)"""
+    proxy = "http://127.0.0.1:%d" % port
+    op = urllib.request.build_opener(
+        urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    t0 = time.time()
+    try:
+        with op.open(SPEED_URL, timeout=max(2.0, timeout_ms / 1000.0)) as resp:
+            if resp.status != 200:
+                return False, 0, 0, int((time.time() - t0) * 1000)
+            data = resp.read(SPEED_BYTES)
+            elapsed = max(0.05, time.time() - t0)
+            got = len(data)
+            if got < 32768:
+                return False, 0, got, int(elapsed * 1000)
+            kbps = int(got / 1024.0 / elapsed)
+            return True, kbps, got, int(elapsed * 1000)
+    except Exception:  # noqa: BLE001
+        return False, 0, 0, int((time.time() - t0) * 1000)
+
+
+def probe_gemini_batch(exe, proxies, workdir, workers, timeout_ms):
+    """对通过压测/测速的最终候选单独检测 Gemini 可达性，不淘汰节点，仅用于标记和组建「🤖 Gemini优选」"""
+    if not proxies:
+        return {}
+    out = {}
+    chunk_size = 150
+    for i in range(0, len(proxies), chunk_size):
+        chunk = proxies[i:i + chunk_size]
+        want = len(chunk) + 1
+        ports = _verify_ports(want)
+        reject_port = ports.pop() if ports else free_port()
+        if len(ports) < len(chunk):
+            chunk = chunk[:len(ports)]
+        if not chunk:
+            continue
+        mixed, ctl = port_pair()
+        cfg = os.path.join(workdir, "gemini_config.yaml")
+        write_verify_config(cfg, chunk, ctl, ports, mixed, reject_port)
+        proc = start_core(exe, cfg, workdir, ctl, os.path.join(workdir, "core-gemini.log"))
+        try:
+            ok, _c, _m, _e = http_probe(reject_port, "google", min(timeout_ms, 5000))
+            if ok:
+                continue
+            with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
+                futs = {ex.submit(http_probe, port, "gemini", timeout_ms): p["__id"]
+                        for p, port in zip(chunk, ports)}
+                for f in as_completed(futs):
+                    ok_m, _c, ms, _e = f.result()
+                    out[futs[f]] = (ok_m, ms if ok_m else None)
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except Exception:  # noqa: BLE001
+                proc.kill()
+    return out
 
 
 def write_verify_config(path, proxies, ctl, ports, mixed, reject_port):
@@ -664,9 +723,9 @@ def write_verify_config(path, proxies, ctl, ports, mixed, reject_port):
         f.write("\n".join(lines) + "\n")
 
 
-def _verify_chunk(exe, chunk, workdir, workers, rounds, timeout_ms):
+def _verify_chunk(exe, chunk, workdir, workers, rounds, timeout_ms, check_gemini=False):
     """一批节点（≤150）的严格验证：开端口 -> 起内核 -> 自检 -> 并发真请求 -> 收尾。
-    返回 ({__id: (g_med, g_hits, g_err, y_med, y_hits, y_err)}, 致命错误说明)"""
+    返回 ({__id: (g_med, g_hits, g_err, y_med, y_hits, y_err, m_med, m_hits, m_err)}, 致命错误说明)"""
     want = len(chunk) + 1                 # 多要一个给“自检 REJECT”口，避免和节点端口撞号
     ports = _verify_ports(want)
     reject_port = ports.pop() if ports else free_port()
@@ -690,19 +749,20 @@ def _verify_chunk(exe, chunk, workdir, workers, rounds, timeout_ms):
         t0 = time.time()
         done = 0
         with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
-            futs = {ex.submit(probe_one_node, port, rounds, timeout_ms): p["__id"]
+            futs = {ex.submit(probe_one_node, port, rounds, timeout_ms, check_gemini): p["__id"]
                     for p, port in zip(chunk, ports)}
             for f in as_completed(futs):
                 rows[futs[f]] = f.result()
                 done += 1
                 if done % 50 == 0:
+                    ok_cnt = sum(1 for v in rows.values()
+                                 if v[0] and v[3] and (not check_gemini or v[6]))
                     log("    %d/%d 已测  通过 %d  %.0fs"
-                        % (done, len(chunk),
-                           sum(1 for v in rows.values() if v[0] and v[3] and v[6]),
-                           time.time() - t0))
+                        % (done, len(chunk), ok_cnt, time.time() - t0))
+        ok_cnt = sum(1 for v in rows.values()
+                     if v[0] and v[3] and (not check_gemini or v[6]))
         log("  本批 %d 个节点实测完成 %.0fs（通过 %d）"
-            % (len(chunk), time.time() - t0,
-               sum(1 for v in rows.values() if v[0] and v[3] and v[6])))
+            % (len(chunk), time.time() - t0, ok_cnt))
     finally:
         proc.terminate()
         try:
@@ -712,21 +772,20 @@ def _verify_chunk(exe, chunk, workdir, workers, rounds, timeout_ms):
     return rows, ""
 
 
-def stress_test(exe, proxies, workdir, workers, burst, timeout_ms, min_ok_ratio, jitter_ms):
-    """并发压测：每个节点同时开 burst 条连接跑真实请求，砍掉“单连正常、并发就废”的节点。
-
-    这正是免费节点最常见的坑：服务端限制单 IP 并发连接数，单线程测一切正常，
-    浏览器一开十几个连接就掉速甚至超时。返回 {__id: {"ok","n","p50","p95","jitter","pass"}}。"""
-    if not proxies:
-        return {}
-    want = len(proxies) + 1
+def _stress_chunk(exe, chunk, workdir, workers, burst, timeout_ms, min_ok_ratio,
+                  jitter_ms, min_speed=0, protected_ids=None):
+    """分批执行并发压测 + 真实 200KB 下载测速"""
+    protected_ids = protected_ids or set()
+    want = len(chunk) + 1
     ports = _verify_ports(want)
     reject_port = ports.pop() if ports else free_port()
-    if len(ports) < len(proxies):
-        proxies = proxies[:len(ports)]
+    if len(ports) < len(chunk):
+        chunk = chunk[:len(ports)]
+    if not chunk:
+        return {}
     mixed, ctl = port_pair()
     cfg = os.path.join(workdir, "stress_config.yaml")
-    write_verify_config(cfg, proxies, ctl, ports, mixed, reject_port)
+    write_verify_config(cfg, chunk, ctl, ports, mixed, reject_port)
     proc = start_core(exe, cfg, workdir, ctl, os.path.join(workdir, "core-stress.log"))
     out = {}
     try:
@@ -734,35 +793,38 @@ def stress_test(exe, proxies, workdir, workers, burst, timeout_ms, min_ok_ratio,
         if ok:
             return {"__fatal__": "内核对 listeners.proxy 支持异常"}
 
-        def one(port):
+        def one(pid, port):
+            is_prot = pid in protected_ids
             with ThreadPoolExecutor(max_workers=burst) as ex:
                 futs = [ex.submit(http_probe, port, "google", timeout_ms) for _ in range(burst)]
                 res = [f.result() for f in futs]
             good = [ms for ok2, _c, ms, _e in res if ok2]
             good.sort()
-            if not good:
-                return {"ok": 0, "n": burst, "p50": None, "p95": None, "jitter": None, "pass": False}
+            need_ok = max(1, burst // 2) if is_prot else max(1, int(burst * min_ok_ratio))
+            if len(good) < need_ok:
+                return {"ok": len(good), "n": burst, "p50": good[len(good) // 2] if good else None,
+                        "p95": None, "jitter": (good[-1] - good[0]) if good else None,
+                        "speed_kbps": 0, "pass": False}
             p50 = good[len(good) // 2]
             p95 = good[max(0, int(len(good) * 0.95) - 1)]
             jitter = good[-1] - good[0]
-            passed = (len(good) >= max(1, int(burst * min_ok_ratio))
-                      and jitter <= jitter_ms)
+            if not is_prot and jitter > jitter_ms:
+                return {"ok": len(good), "n": burst, "p50": p50, "p95": p95,
+                        "jitter": jitter, "speed_kbps": 0, "pass": False}
+            # 真实下载测速（约 200KB）：过滤“204 秒回但下载限速/卡死”的假快节点
+            dl_ok, kbps, _got, _dl_ms = download_probe(port, max(timeout_ms, 6000))
+            if is_prot:
+                # 台湾住宅节点优先保障：能正常传输数据即可，不做严苛跨洋带宽/抖动一刀切
+                passed = dl_ok
+            else:
+                passed = dl_ok and (min_speed <= 0 or kbps >= min_speed)
             return {"ok": len(good), "n": burst, "p50": p50, "p95": p95,
-                    "jitter": jitter, "pass": passed}
+                    "jitter": jitter, "speed_kbps": kbps, "pass": passed}
 
-        t0 = time.time()
-        done = 0
         with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
-            futs = {ex.submit(one, port): p["__id"] for p, port in zip(proxies, ports)}
+            futs = {ex.submit(one, p["__id"], port): p["__id"] for p, port in zip(chunk, ports)}
             for f in as_completed(futs):
                 out[futs[f]] = f.result()
-                done += 1
-                if done % 25 == 0:
-                    log("    压测 %d/%d  通过 %d  %.0fs"
-                        % (done, len(proxies), sum(1 for v in out.values() if v.get("pass")),
-                           time.time() - t0))
-        log("  并发压测完成 %.0fs：%d/%d 个扛住了 %d 并发"
-            % (time.time() - t0, sum(1 for v in out.values() if v.get("pass")), len(out), burst))
     finally:
         proc.terminate()
         try:
@@ -772,19 +834,41 @@ def stress_test(exe, proxies, workdir, workers, burst, timeout_ms, min_ok_ratio,
     return out
 
 
-def verify_sites(exe, proxies, workdir, workers, rounds, timeout_ms, max_delay, min_hits):
-    """严格验证：谷歌 204 + YouTube 200 + Gemini 200 都得真拿到，且延迟 ≤ max_delay。
+def stress_test(exe, proxies, workdir, workers, burst, timeout_ms, min_ok_ratio,
+                jitter_ms, min_speed=0, protected_ids=None):
+    """并发压测 + 真实带宽测速：砍掉“单连正常、并发就废”及“限速卡死”的节点。
 
-    做法：给每个节点开一个独立入站端口（mihomo listeners 的 proxy 字段），
-    然后从本机真实发出 HTTP/HTTPS 请求 —— 状态码、响应内容、TLS 全是真的，
-    和你在浏览器里打开是一回事，不是“看着像通”。
+    protected_ids（台湾住宅节点）：放宽并发及跨洋抖动/速率门槛，确保优先保留。"""
+    if not proxies:
+        return {}
+    out = {}
+    t0 = time.time()
+    chunk_size = 150
+    for i in range(0, len(proxies), chunk_size):
+        part = _stress_chunk(exe, proxies[i:i + chunk_size], workdir, workers, burst,
+                             timeout_ms, min_ok_ratio, jitter_ms, min_speed=min_speed,
+                             protected_ids=protected_ids)
+        if "__fatal__" in part:
+            return part
+        out.update(part)
+        log("    压测+测速 %d/%d  通过 %d  %.0fs"
+            % (min(i + chunk_size, len(proxies)), len(proxies),
+               sum(1 for v in out.values() if v.get("pass")), time.time() - t0))
+    log("  并发压测+测速完成 %.0fs：%d/%d 个达标（%d 并发，最低带宽 %d KB/s）"
+        % (time.time() - t0, sum(1 for v in out.values() if v.get("pass")),
+           len(out), burst, min_speed))
+    return out
+
+
+def verify_sites(exe, proxies, workdir, workers, rounds, timeout_ms, max_delay, min_hits,
+                 check_gemini=False):
+    """严格验证：谷歌 204 + YouTube 200（可选同步测 Gemini）都得真拿到，且延迟 ≤ max_delay。
 
     返回 ({__id: {...}}, 统计)，并给节点打 __tier：
-      full  = 谷歌 + YouTube + Gemini 都通，延迟达标  -> 下发
-      slow  = 三个都通但延迟超标                      -> 默认丢弃，--keep-slow 才保留
-      gonly = 只有谷歌通（YouTube/Gemini 不通）       -> 默认丢弃，--keep-gonly 才保留
-      ngem  = 谷歌 + YouTube 通但 Gemini 不通（多为地区封锁，如香港入口）-> 默认丢弃，--keep-ngem 才保留；
-             例外：台加住宅 IP 默认豁免（见 --no-resi-ngem-exempt），它们在「🚫 无Gemini备用」组
+      full  = 站点都通且延迟达标        -> 下发
+      slow  = 站点都通但延迟超标        -> 默认丢弃，--keep-slow 才保留
+      gonly = 只有谷歌通（YouTube 不通）-> 默认丢弃，--keep-gonly 才保留
+      ngem  = 仅在 check_gemini=True 时出现（谷歌+YouTube 通但 Gemini 不通）
     """
     for i, p in enumerate(proxies):
         if not p.get("__id"):
@@ -798,7 +882,7 @@ def verify_sites(exe, proxies, workdir, workers, rounds, timeout_ms, max_delay, 
             % ((total + chunk_size - 1) // chunk_size, chunk_size))
     for i in range(0, total, chunk_size):
         part, fatal = _verify_chunk(exe, proxies[i:i + chunk_size], workdir, workers,
-                                    rounds, timeout_ms)
+                                    rounds, timeout_ms, check_gemini=check_gemini)
         if fatal:
             return {}, {"fatal": fatal}
         rows.update(part)
@@ -808,7 +892,7 @@ def verify_sites(exe, proxies, workdir, workers, rounds, timeout_ms, max_delay, 
     for nid, (g, gh, ge, y, yh, ye, m, mh, me) in rows.items():
         ok_g = g is not None and gh >= min_hits
         ok_y = y is not None and yh >= min_hits
-        ok_m = m is not None and mh >= min_hits
+        ok_m = (m is not None and mh >= min_hits) if check_gemini else True
         if ok_g and ok_y and ok_m:
             tier = "full" if g <= max_delay else "slow"
             result[nid] = {"delay": g, "hits": gh, "google": g, "youtube": y,
@@ -1140,14 +1224,14 @@ def geolocate(servers):
                 except Exception:  # noqa: BLE001
                     info[ip] = {"cc": "", "isp": "", "org": "", "as": "", "reverse": "",
                                 "hosting": False, "proxy": False}
-    return {srv: info.get(ip) or {"cc": "", "isp": "", "org": "", "as": "", "reverse": "",
-                                  "hosting": False, "proxy": False}
+    return {srv: dict(info.get(ip) or {"cc": "", "isp": "", "org": "", "as": "", "reverse": "",
+                                       "hosting": False, "proxy": False}, ip=ip or "")
             for srv, ip in ips.items()}
 
 
 # ---------------------------------------------------------------- 8. 输出
-REGION_ORDER = [("HK", "🇭🇰 香港"), ("TW", "🇹🇼 台湾"), ("JP", "🇯🇵 日本"), ("SG", "🇸🇬 新加坡"),
-                ("US", "🇺🇸 美国"), ("CA", "🇨🇦 加拿大"), ("KR", "🇰🇷 韩国")]
+REGION_ORDER = [("TW", "🇹🇼 台湾"), ("CA", "🇨🇦 加拿大"), ("US", "🇺🇸 美国"),
+                ("SG", "🇸🇬 新加坡"), ("JP", "🇯🇵 日本"), ("HK", "🇭🇰 香港"), ("KR", "🇰🇷 韩国")]
 EU = {"NL", "DE", "GB", "FR", "IT", "RU", "CH", "SE", "CZ", "LV", "AT", "IE", "FI", "NO", "DK",
       "PL", "ES", "PT", "RO", "BG", "HU", "SK", "UA", "LT", "EE", "BE", "LU", "MD", "RS", "HR",
       "GR", "TR", "CY", "MT", "IS", "AL"}
@@ -1195,7 +1279,9 @@ RESI_KEYWORDS = ("comcast", "charter", "spectrum", "cox ", "at&t", "verizon",
                  "t-mobile", "tmobile", "us cellular", "rogers", "bell canada",
                  "telus", "sasktel", "eastlink", "cogeco", "videotron",
                  "chunghwa", "中華電信", "hinet", "taiwan mobile", "台湾大哥大",
-                 "aptg", "远传", "中华电信", "kddi", "softbank", "iij",
+                 "far eastone", "fareastone", "taiwan fixed network", "seednet",
+                 "so-net", "kbro", "homeplus", "taiwan broadband", "taiwan star",
+                 "asia pacific telecom", "aptg", "远传", "中华电信", "kddi", "softbank", "iij",
                  "sk broadband", "sk telecom", "lg uplus", "lg u+", "kt corp",
                  "singtel", "starhub", "myrepublic", "viewqwest", "pccw", "hkbn",
                  "hong kong broadband", "hkt", "smartone", "china telecom",
@@ -1228,8 +1314,6 @@ def classify_resi(info):
         return None
     if info.get("hosting") is True:
         return False
-    if info.get("proxy") is True:          # 被标成公开代理的，基本都是机房/公开池
-        return False
     isp = str(info.get("isp") or "").lower()
     org_as = " | ".join(str(info.get(k) or "") for k in ("org", "as")).lower()
     rdns = str(info.get("reverse") or "").lower()
@@ -1237,9 +1321,11 @@ def classify_resi(info):
         return False
     if any(k in rdns for k in DC_KEYWORDS):     # dedicated./vps/hosting 的 rDNS 比 isp 可信
         return False
+    if any(k in org_as for k in DC_KEYWORDS):
+        return False
     if any(k in isp for k in RESI_KEYWORDS):
         return True
-    if any(k in org_as for k in DC_KEYWORDS):
+    if info.get("proxy") is True:          # 非明确家宽 ISP 且被标成公开代理的，多半是公开机房池
         return False
     if any(k in rdns for k in RESI_RDNS):
         return True
@@ -1290,15 +1376,14 @@ def load_selfhost(path):
         return []
 
 
-def load_previous(path, limit=60):
+def load_previous(path, limit=60, exclude_types=None):
     """把上一版订阅里的节点捞出来当“老选手”优先进池。
 
-    为什么要这么做：昨天实测很稳的节点，今天大概率还是稳的；但如果今天的抓取里
-    恰好没有同一个节点（上游轮换很快），原流程就会把它丢掉。先复测老节点、达标的
-    直接留，订阅就不会每天大换血。
+    按节点名里的延迟升序挑选（台湾住宅最优先），避免慢节点长期霸占名额。
     """
     if not path or not os.path.isfile(path):
         return []
+    exclude_types = exclude_types or set()
     try:
         import yaml
         doc = yaml.safe_load(open(path, encoding="utf-8"))
@@ -1308,20 +1393,23 @@ def load_previous(path, limit=60):
     if not isinstance(doc, dict) or not isinstance(doc.get("proxies"), list):
         log("  [warn] 上一版订阅里没有 proxies（忽略）")
         return []
-    out = []
-    for p in doc["proxies"]:               # 文件本身按延迟升序，取前 limit 个就是昨天最好的
+    scored = []
+    for p in doc["proxies"]:
         if not isinstance(p, dict):
             continue
         t = str(p.get("type") or "").lower()
-        if t not in ALLOWED_TYPES or not p.get("server") or not p.get("port"):
+        if t not in ALLOWED_TYPES or t in exclude_types or not p.get("server") or not p.get("port"):
             continue
+        nm = str(p.get("name") or "")
+        m = re.search(r"·\s*(\d+)ms", nm)
+        ms = int(m.group(1)) if m else 9999
+        tw_resi = 0 if ("·住宅" in nm and "TW" in nm) else 1
         q = {k: v for k, v in p.items() if not str(k).startswith("__") and k != "name"}
         q["__carry"] = 1
         q["__src"] = "prev"
-        out.append(q)
-        if len(out) >= limit:
-            break
-    return out
+        scored.append((tw_resi, ms, q))
+    scored.sort(key=lambda x: (x[0], x[1]))
+    return [x[2] for x in scored[:limit]]
 
 
 def second_build(candidates, verified, geo, path, regions, resi_cc=None):
@@ -1370,7 +1458,8 @@ def second_build(candidates, verified, geo, path, regions, resi_cc=None):
 
 
 def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, write_txt=True,
-          max_per_region=0, region_cap=None, resi_cap=0, max_resi_total=40, resi_cc=None):
+          max_per_region=0, region_cap=None, resi_cap=0, max_resi_total=40, resi_cc=None,
+          max_per_ip=0):
     selfhost = selfhost or []
     resi_cc = resi_cc or set()
     items = []
@@ -1379,28 +1468,53 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
         d = nodes_delay[nid]
         g = geo.get(str(p.get("server")), {})
         cc_g = (g.get("cc") or "").upper()
-        # 只认 TW/CA 的住宅 IP：免费源里的“别国家宽”（US 29 / CN 27 / KR 8 …）对用户没用，
-        # 一是会把「🏠 住宅IP优选」组塞满，二是它们本来就不是用户要的地区。
-        # 注意不删节点，只是不再按“住宅”给它们加分 —— 普通节点该测该留照旧。
+        # 只认 TW/CA 的住宅 IP：免费源里的“别国家宽”对用户没用，不计入住宅组
         is_resi = classify_resi(g) is True and (not resi_cc or cc_g in resi_cc)
+        resi_rank = 0 if (is_resi and cc_g == "TW") else (1 if is_resi else 2)
+        speed_kbps = int(d.get("speed") or 0)
+        jitter_ms = int(d.get("jitter") or 0)
+        # 综合质量分（越低越好）：基础延迟 + 抖动惩罚 - 带宽加分
+        qscore = max(1, int(d["delay"]) + min(200, jitter_ms // 2) - min(80, speed_kbps // 25))
         items.append({"node": p, "cc": g.get("cc", ""), "delay": d["delay"], "hits": d["hits"],
                       "tier": p.get("__tier", "full"),
                       "carry": bool(p.get("__carry")),
                       "resi": is_resi,
+                      "resi_rank": resi_rank,
+                      "speed": speed_kbps,
+                      "jitter": jitter_ms,
+                      "qscore": qscore,
+                      "gemini": bool(d.get("gemini")),
+                      "ip": g.get("ip") or str(p.get("server")),
                       "cn": d.get("cn")})
-    # 排序优先级：完整验证档 > 住宅 IP > 老选手 > 延迟。
-    # 住宅 IP 排在老选手之前（用户明确要求“优先保证住宅 ip”），老选手只压非住宅的新节点，
-    # 这样上一版留下的机房节点不会挤掉本轮抓到的家宽节点。
+    # 排序优先级：验证档 > 台湾住宅(0)/其余住宅(1)/普通(2) > 综合质量分(延迟+抖动-带宽) > 老选手(仅作同分决胜)。
+    # 彻底修复“老慢节点排在 49ms 新节点前面”的倒挂问题。
     items.sort(key=lambda x: (TIER_RANK.get(x["tier"], 3),
-                              0 if x.get("resi") else 1,
+                              x["resi_rank"],
+                              x["qscore"],
                               0 if x["carry"] else 1,
-                              x["delay"], -x["hits"]))
+                              -x["hits"]))
 
-    # 每地区只留最快的 N 个（carry 老选手同样占额度，否则上一版的美国垃圾会成批续命）：
-    # region_cap 可按地区覆盖（如美国/加拿大/台湾放宽、日韩港收紧），未列出的地区用 max_per_region。
-    # resi_cap：住宅 IP 在地区配额之外额外保留（每地区最多 N 个，全局最多 max_resi_total 个），
-    # 这样“同地区更快的机房节点”不会把家宽节点挤出去 —— 这是用户“优先保证住宅 IP”的硬保证，
-    # 光靠排序在配额满时仍会先被截断。
+    # 同端口/同 IP 去重：避免聚合源把同一个 IP 用不同伪装 Host 塞 5 份占满配额
+    deduped, seen_ep, ip_cnt = [], set(), {}
+    for it in items:
+        p = it["node"]
+        ep = (str(p.get("server") or "").lower().strip(), int(p.get("port") or 0))
+        if ep in seen_ep:
+            continue
+        seen_ep.add(ep)
+        ip = str(it["ip"] or "").lower().strip()
+        is_tw_resi = it["resi"] and it["cc"] == "TW"
+        if max_per_ip > 0 and not is_tw_resi and ip:
+            ip_cnt[ip] = ip_cnt.get(ip, 0) + 1
+            if ip_cnt[ip] > max_per_ip:
+                continue
+        deduped.append(it)
+    if len(deduped) < len(items):
+        log("  同端点/同IP去重: 剔除 %d 个重复克隆，%d → %d"
+            % (len(items) - len(deduped), len(items), len(deduped)))
+    items = deduped
+
+    # 每地区只留最快的 N 个（region_cap 按地区覆盖，resi_cap 额外保底台湾/加拿大住宅 IP）
     region_cap = region_cap or {}
     if max_per_region > 0 or region_cap:
         kept, quota, resi_kept = [], {}, 0
@@ -1412,7 +1526,6 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
                 kept.append(it)
             elif it.get("resi") and resi_cap > 0 and resi_kept < max_resi_total \
                     and quota.get(("resi", cc), 0) < resi_cap:
-                # 住宅节点超额保留：不占地区配额，单独计数
                 quota[("resi", cc)] = quota.get(("resi", cc), 0) + 1
                 resi_kept += 1
                 kept.append(it)
@@ -1445,10 +1558,12 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
         proxies.append(p)
 
     primary_items = [it for it in items if it["tier"] == "full"]
-    primary_names = [it["name"] for it in primary_items]
-    # 住宅组收录所有档位里的住宅节点：台加家宽大多 Gemini 不通（ngem 档），
-    # 只收 full 档会让「🏠 住宅IP优选」变成空组 —— 而那正是用户最想用的那一组
+    # 自动选择/故障转移按综合质量分升序，不被跨洋 1000ms 节点占住头部
+    fast_sorted = sorted(primary_items or items, key=lambda x: (x["qscore"], 0 if x["carry"] else 1))
+    main_pool = [it["name"] for it in fast_sorted]
     resi_names = [it["name"] for it in items if it.get("resi")]
+    gemini_names = [it["name"] for it in sorted(items, key=lambda x: (x["resi_rank"], x["qscore"]))
+                    if it.get("gemini")]
     all_names = [it["name"] for it in items]
     # 没通过完整验证的（延迟超标 / YouTube 不通）只在带 --keep-* 时才会存在，单独分组收纳
     extra = [(tier, label, [it["name"] for it in items if it["tier"] == tier])
@@ -1457,14 +1572,11 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
     extra = [x for x in extra if x[2]]
 
     regions = {}
-    # 地区组用全部档位（含 ngem 豁免的台加住宅）：台湾节点绝大多数 Gemini 不通，
-    # 只按 full 档建组会让「🇹🇼 台湾」整组消失，用户就找不到想手动选的台湾节点了
     for it in items:
         regions.setdefault(it["region"], []).append(it["name"])
     order = [lbl for _, lbl in REGION_ORDER if lbl in regions]
     order += [lbl for lbl in ("🇪🇺 欧洲", "🌍 其他") if lbl in regions]
 
-    main_pool = primary_names or all_names     # 自动选择/故障转移只用完整验证通过的
     check_url = "https://www.gstatic.com/generate_204"
 
     def render(path, sh):
@@ -1531,23 +1643,26 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
             groups.append({"name": "🔀 智能切换", "type": "fallback", "url": check_url,
                            "interval": 300, "proxies": ["🏠 自建节点", "♻️ 自动选择"]})
         select_list = (["🔀 智能切换"] if sh else []) + (["🏠 自建节点"] if sh else []) \
-            + ["♻️ 自动选择", "🔯 故障转移"] + (["🏠 住宅IP优选"] if resi_names else []) \
-            + order + ["🎯 全球直连"] \
+            + ["♻️ 自动选择"] + (["🏠 住宅IP优选"] if resi_names else []) \
+            + order + ["🔯 故障转移"] + (["🤖 Gemini优选"] if gemini_names else []) \
+            + ["🎯 全球直连"] \
             + [lbl for _, lbl, _ in extra] \
             + sh_names + all_names
         groups.insert(0, {"name": "🚀 节点选择", "type": "select", "proxies": select_list})
         groups.append({"name": "♻️ 自动选择", "type": "url-test", "url": check_url,
                        "interval": 300, "tolerance": 50, "lazy": False, "proxies": main_pool})
-        # 故障转移只放亚太节点：CI 机房在美国，按机房延迟排的 main_pool 头部常被美国节点占满，
-        # 但国内体验最好的是港台日韩新（机房测得慢、用户反而连得快）
-        asia_names = [it["name"] for it in primary_items if it["cc"] in ASIA_STRICT]
+        # 故障转移优先用高可用低延迟的优胜节点（主要为 TW/CA/US 及快 SG/JP）
+        fb_names = [it["name"] for it in fast_sorted if it["cc"] in ("TW", "CA", "US", "SG", "JP")]
         groups.append({"name": "🔯 故障转移", "type": "fallback", "url": check_url,
-                       "interval": 300, "proxies": (asia_names or main_pool)[:20]})
+                       "interval": 300, "proxies": (fb_names or main_pool)[:20]})
         if resi_names:
-            # 住宅 IP 专用 url-test 组：家宽 ISP 出口，Gemini/流媒体风控比机房 IP 友好
+            # 住宅 IP 专用 url-test 组：台湾住宅排在最前
             groups.append({"name": "🏠 住宅IP优选", "type": "url-test", "url": check_url,
                            "interval": 300, "tolerance": 50, "lazy": False,
                            "proxies": resi_names})
+        if gemini_names:
+            groups.append({"name": "🤖 Gemini优选", "type": "url-test", "url": check_url,
+                           "interval": 300, "tolerance": 50, "proxies": gemini_names})
         for lbl in order:
             groups.append({"name": lbl, "type": "url-test", "url": check_url,
                            "interval": 300, "tolerance": 50, "proxies": regions[lbl]})
@@ -1579,10 +1694,10 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
     def write_nodes_txt(path):
         stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime())
         txt_path = os.path.join(os.path.dirname(os.path.abspath(path)), "nodes.txt")
-        rows = ["# 免费节点清单  " + stamp, "# 序号 | 地区 | 协议 | 服务器:端口 | 延迟(ms)", ""]
+        rows = ["# 免费节点清单  " + stamp, "# 序号 | 地区 | 协议 | 服务器:端口 | 延迟(ms) | 带宽(KB/s)", ""]
         for i, (p, it) in enumerate(zip(proxies, items), 1):
-            rows.append("%3d | %-2s | %-9s | %s:%s | %d" % (i, it["cc"] or "??", p["type"],
-                                                            p["server"], p["port"], it["delay"]))
+            rows.append("%3d | %-2s | %-9s | %s:%s | %d | %d" % (
+                i, it["cc"] or "??", p["type"], p["server"], p["port"], it["delay"], it.get("speed", 0)))
         with open(txt_path, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(rows) + "\n")
 
@@ -1737,6 +1852,21 @@ def main():
     ap.add_argument("--cn-types", default="ss,trojan",
                     help="只保留这些协议（默认 ss,trojan）。实测国内：reality 0%%、ws/CDN 前缀 0%%、"
                          "ss/trojan 约 20%%；传空字符串表示不限制")
+    ap.add_argument("--exclude-types", default="",
+                    help="排除的协议列表（如 http,socks5），在抓取解析后直接剔除，不浪费测速资源")
+    ap.add_argument("--na-max-delay", type=int, default=0,
+                    help="机房实测时美国/加拿大节点延迟上限（ms，0=沿用 --max-delay）；"
+                         "美国 runner 测北美节点超过 400ms 即为拥堵或绕路")
+    ap.add_argument("--other-max-delay", type=int, default=0,
+                    help="机房实测时非台湾/非北美节点延迟上限（ms，0=沿用 --max-delay）")
+    ap.add_argument("--tw-max-delay", type=int, default=0,
+                    help="机房实测时台湾节点延迟上限（ms，0=沿用 --max-delay），适合跨洋家宽节点")
+    ap.add_argument("--min-speed", type=int, default=0,
+                    help="真实下载带宽下限（KB/s，0=不限制；台湾住宅节点豁免此门槛）")
+    ap.add_argument("--max-per-ip", type=int, default=0,
+                    help="同一服务器 IP 在最终结果中最多保留 N 个节点（0=不限制；台湾住宅豁免）")
+    ap.add_argument("--require-gemini", action="store_true",
+                    help="强要求通过 Gemini 才能下发（默认仅单独测出后归入「🤖 Gemini优选」，不误杀好节点）")
     ap.add_argument("--cn-workers", type=int, default=4,
                     help="并发创建的探针测量数量，默认 4")
     ap.add_argument("--allow-degraded", action="store_true",
@@ -1791,8 +1921,9 @@ def main():
 
     # 第 1 步：先把上一版的节点捞出来当“老选手”。它们只在确实还快（上海 ≤ carry 门槛）时才留，
     # 不合格的直接丢掉，剩下的名额交给下面的常规流程。
+    exclude_types = {t.strip().lower() for t in args.exclude_types.split(",") if t.strip()}
     prev_path = args.public_out or args.out
-    prev = [] if args.no_carry else load_previous(prev_path, args.carry_limit)
+    prev = [] if args.no_carry else load_previous(prev_path, args.carry_limit, exclude_types=exclude_types)
     CARRY_GATE = args.carry_max_delay
     BURST_N, BURST_MIN_OK, BURST_JITTER = args.burst, args.burst_min_ok, args.burst_jitter
     log("[1/9] 复测上一版订阅（老节点优先）")
@@ -1835,6 +1966,8 @@ def main():
             continue
         got = 0
         for p in normalize(doc["proxies"], src):
+            if exclude_types and str(p.get("type") or "").lower() in exclude_types:
+                continue
             k = dedupe_key(p)
             if k in seen:
                 continue
@@ -1842,6 +1975,8 @@ def main():
             got += 1
             merged.append(p)
         log("  %-40s 新增 %4d" % (src[:40], got))
+    if exclude_types:
+        log("  已过滤开放/明文协议: %s" % "/".join(sorted(exclude_types)))
     log("  去重后候选: %d（用时 %.1fs）" % (len(merged), time.time() - t_parse))
     if len(merged) < args.min_nodes:
         log("候选节点过少，退出")
@@ -1877,8 +2012,8 @@ def main():
         return 1
     candidates = [p for p in merged if p["__id"] in quick]
 
-    log("[6/9] 严格验证：谷歌 + YouTube + Gemini 可达性（%d 轮，机房延迟门槛 %dms）" %
-        (args.verify_rounds, args.max_delay))
+    log("[6/9] 严格验证：谷歌 + YouTube%s 可达性（%d 轮，机房延迟门槛 %dms）" %
+        (" + Gemini" if args.require_gemini else "", args.verify_rounds, args.max_delay))
     min_hits = args.min_hits or args.verify_rounds
     min_hits = max(1, min(min_hits, args.verify_rounds))
     global nodes_delay, DELAY_GATE, DELAY_GATE_ASIA, DELAY_GATE_CN
@@ -1887,7 +2022,8 @@ def main():
     DELAY_GATE_CN = 0                      # 探针真拿到数据后才置为真实门槛（见第 7 步）
     verified, vstat = verify_sites(exe, candidates, work, min(args.workers, 64),
                                    args.verify_rounds, args.verify_timeout,
-                                   args.max_delay, min_hits)
+                                   args.max_delay, min_hits,
+                                   check_gemini=args.require_gemini)
     if vstat.get("fatal"):
         log("  严格验证无法进行：%s" % vstat["fatal"])
         annotate("严格验证无法进行：%s" % vstat["fatal"])
@@ -1986,18 +2122,27 @@ def main():
                 verified.pop(p["__id"], None)
         candidates = probe_pool
 
-    # ---- 并发压测：真实代理链路 + 多连接，先砍掉“连不上”和“抖动大”的 ----
+    # ---- 并发压测 + 真实带宽测速：砍掉“单连正常、并发就废”及“限速卡死”的节点 ----
+    tw_resi_ids = {
+        p["__id"] for p in candidates
+        if (geo.get(str(p.get("server")), {}).get("cc") or "").upper() == "TW"
+        and classify_resi(geo.get(str(p.get("server")), {})) is True
+    }
+    if tw_resi_ids:
+        log("  [保护] 识别到 %d 个台湾住宅 IP 候选，并发/跨洋速率门槛已自动放宽" % len(tw_resi_ids))
+    st = {}
     if args.burst > 0 and candidates:
-        log("[压测] 每节点 %d 并发，要求成功率 ≥%.0f%%、抖动 ≤%dms"
-            % (args.burst, args.burst_min_ok * 100, args.burst_jitter))
+        log("[压测] 每节点 %d 并发 + 200KB 下载测速（成功率 ≥%.0f%%、抖动 ≤%dms、带宽 ≥%d KB/s）"
+            % (args.burst, args.burst_min_ok * 100, args.burst_jitter, args.min_speed))
         st = stress_test(exe, candidates, work, min(args.workers, 32), args.burst,
-                         args.verify_timeout, args.burst_min_ok, args.burst_jitter)
+                         args.verify_timeout, args.burst_min_ok, args.burst_jitter,
+                         min_speed=args.min_speed, protected_ids=tw_resi_ids)
         if "__fatal__" in st:
             annotate("并发压测无法进行：%s" % st["__fatal__"])
             return 1
         passed = [p for p in candidates if st.get(p["__id"], {}).get("pass")]
         bad = len(candidates) - len(passed)
-        log("  压测通过 %d / %d（砍掉 %d 个：连不上或抖动大）"
+        log("  压测+测速通过 %d / %d（砍掉 %d 个：并发不稳/抖动大/带宽不足）"
             % (len(passed), len(candidates), bad))
         if passed:
             good_ids = {p["__id"] for p in passed}
@@ -2113,29 +2258,48 @@ def main():
                 log("  老节点复测: 保留 %d 个（上海 ≤%dms）" % (n_carry_ok, args.carry_max_delay))
         DELAY_GATE_CN = args.cn_max_delay if cn_hit else 0
 
+    # 分地区机房延迟门槛（未启用上海探针时，剔除北美>400ms / 非台非北美>900ms 的拥堵绕路节点）
+    if not cn_hit and (args.na_max_delay > 0 or args.other_max_delay > 0 or args.tw_max_delay > 0):
+        reg_demoted = 0
+        for p in candidates:
+            info = verified.get(p["__id"])
+            if not info or info["tier"] != "full":
+                continue
+            cc = (geo.get(str(p.get("server")), {}).get("cc") or "").upper()
+            if cc in ("US", "CA") and args.na_max_delay > 0 and info["delay"] > args.na_max_delay:
+                info["tier"] = "slow"
+                reg_demoted += 1
+            elif cc == "TW" and args.tw_max_delay > 0 and info["delay"] > args.tw_max_delay:
+                info["tier"] = "slow"
+                reg_demoted += 1
+            elif cc not in ("TW", "US", "CA") and args.other_max_delay > 0 and info["delay"] > args.other_max_delay:
+                info["tier"] = "slow"
+                reg_demoted += 1
+        if reg_demoted:
+            log("  分地区延迟门槛（北美 ≤%dms / 台湾 ≤%dms / 其他 ≤%dms）: 淘汰 %d 个慢节点"
+                % (args.na_max_delay, args.tw_max_delay, args.other_max_delay, reg_demoted))
+
     n_full = sum(1 for v in verified.values() if v["tier"] == "full")
     n_slow = sum(1 for v in verified.values() if v["tier"] == "slow")
     n_gonly = sum(1 for v in verified.values() if v["tier"] == "gonly")
     n_ngem = sum(1 for v in verified.values() if v["tier"] == "ngem")
     unit = "上海" if cn_hit else "机房"
-    log("  谷歌+YouTube+Gemini 都通，且%s延迟 ≤%dms: %d 个 ✔"
-        % (unit, args.cn_max_delay if cn_hit else args.max_delay, n_full))
+    log("  谷歌+YouTube%s 都通，且%s延迟达标: %d 个 ✔"
+        % ("+Gemini" if args.require_gemini else "", unit, n_full))
     log("  延迟超标: %d 个%s" % (n_slow, "，已保留" if args.keep_slow else "，丢弃"))
     log("  YouTube 不通（仅谷歌）: %d 个%s" % (n_gonly, "，已保留" if args.keep_gonly else "，丢弃"))
-    log("  Gemini 不通（谷歌+YouTube 通，多为地区封锁）: %d 个%s"
-        % (n_ngem, "，已保留" if args.keep_ngem else "，丢弃"))
+    if args.require_gemini:
+        log("  Gemini 不通（谷歌+YouTube 通，多为地区封锁）: %d 个%s"
+            % (n_ngem, "，已保留" if args.keep_ngem else "，丢弃"))
     log("  三个站点都不通: %d 个，丢弃" % vstat["dead"])
     if vstat["youtube_only"]:
         log("  只有 YouTube 通、谷歌不通（可疑节点）: %d 个，丢弃" % vstat["youtube_only"])
-    ds = sorted(info["delay"] for info in verified.values() if info["delay"])
+    ds = sorted(info["delay"] for info in verified.values() if info["tier"] == "full" and info["delay"])
     if ds:
-        log("  三站都通的节点%s延迟分布: <100ms %d | 100-200ms %d | 200-400ms %d | 400-800ms %d | >800ms %d"
+        log("  达标节点%s延迟分布: <100ms %d | 100-200ms %d | 200-400ms %d | 400-800ms %d | >800ms %d"
             % (unit, sum(1 for d in ds if d < 100), sum(1 for d in ds if 100 <= d < 200),
                sum(1 for d in ds if 200 <= d < 400), sum(1 for d in ds if 400 <= d < 800),
                sum(1 for d in ds if d >= 800)))
-        log("  （当前%s门槛 %dms；太严/太松就调 %s）"
-            % (unit, args.cn_max_delay if cn_hit else args.max_delay,
-               "--cn-max-delay" if cn_hit else "--max-delay"))
     if n_full == 0:
         log("  没有一个节点通过全部门槛，保留上一版订阅，不下发空配置")
         annotate("最终 0 个节点通过（候选 %d，上海探针有数据 %d）；"
@@ -2155,9 +2319,6 @@ def main():
         if info["tier"] == "gonly" and not args.keep_gonly:
             continue
         if info["tier"] == "ngem" and not args.keep_ngem:
-            # 台加住宅 IP 豁免：免费源里的台加家宽几乎全被 Gemini 拒（Google 不认这些住宅出口），
-            # 但用户要的就是这批家宽节点，全丢掉等于没有住宅 IP。保留但打上 ·无Gemini 标记，
-            # 只进「🏠 住宅IP优选」和「🚫 无Gemini备用」两组，不进主池。
             g = geo.get(str(p.get("server")), {})
             is_resi = classify_resi(g) is True and \
                 (not resi_cc or (g.get("cc") or "").upper() in resi_cc)
@@ -2165,12 +2326,16 @@ def main():
                 continue
             n_resi_exempt += 1
         p["__tier"] = info["tier"]
+        st_row = st.get(p["__id"], {})
         nodes_delay[p["__id"]] = {"delay": info["delay"], "hits": info["hits"],
-                                  "tests": args.verify_rounds, "cn": info.get("cn")}
+                                  "tests": args.verify_rounds, "cn": info.get("cn"),
+                                  "speed": st_row.get("speed_kbps") or 0,
+                                  "jitter": st_row.get("jitter") or 0,
+                                  "gemini": bool(info.get("gemini"))}
     if n_resi_exempt:
         log("  [豁免] %d 个台加住宅 IP 虽 Gemini 不通仍保留（--no-resi-ngem-exempt 可关闭）"
             % n_resi_exempt)
-    # 兜底：完整通过的太少时，自动补几个“能打开三个站、只是慢”的节点，
+    # 兜底：完整通过的太少时，自动补几个“能打开站点、只是慢”的节点，
     # 免得某天门槛过严直接下发空订阅（它们会单独进「🐢 高延迟备用」，不进主池）
     if args.fallback_slow and len(nodes_delay) < args.min_nodes:
         spare = [p for p in candidates
@@ -2183,8 +2348,12 @@ def main():
                 break
             info = verified[p["__id"]]
             p["__tier"] = "slow"
+            st_row = st.get(p["__id"], {})
             nodes_delay[p["__id"]] = {"delay": info["delay"], "hits": info["hits"],
-                                      "tests": args.verify_rounds}
+                                      "tests": args.verify_rounds,
+                                      "speed": st_row.get("speed_kbps") or 0,
+                                      "jitter": st_row.get("jitter") or 0,
+                                      "gemini": bool(info.get("gemini"))}
             added += 1
         if added:
             log("  [兜底] 完整通过不足 %d 个，自动补入 %d 个高延迟节点，保证订阅不空"
@@ -2198,6 +2367,17 @@ def main():
         annotate("严格验证后只剩 %d 个节点（门槛 %dms），少于阈值 %d；可放宽 --max-delay"
                  % (len(alive), args.max_delay, args.min_nodes))
         return 1
+
+    # 仅对最终达标的节点做一次快速 Gemini 检测，用于构建「🤖 Gemini优选」组，不再误杀其他节点
+    if not args.require_gemini and alive:
+        gem = probe_gemini_batch(exe, alive, work, min(args.workers, 64), args.verify_timeout)
+        gem_ok = 0
+        for pid, (ok_m, _ms) in gem.items():
+            if pid in nodes_delay:
+                nodes_delay[pid]["gemini"] = bool(ok_m)
+                if ok_m:
+                    gem_ok += 1
+        log("  Gemini 专项探测: %d / %d 个可用（已归入「🤖 Gemini优选」组）" % (gem_ok, len(alive)))
 
     log("[9/9] 生成配置并校验")
     sh_nodes = load_selfhost(args.selfhost)
@@ -2213,7 +2393,8 @@ def main():
                            args.public_out or None, max_per_region=args.max_per_region,
                            region_cap=region_cap, resi_cap=args.resi_cap,
                            max_resi_total=args.max_resi_total,
-                           resi_cc={c.strip().upper() for c in args.resi_cc.split(",") if c.strip()})
+                           resi_cc={c.strip().upper() for c in args.resi_cc.split(",") if c.strip()},
+                           max_per_ip=args.max_per_ip)
     log("  输出: %s  (免费 %d + 自建 %d)" % (args.out, len(proxies), len(sh_nodes)))
     if args.public_out:
         log("  公开版: %s  (只含免费节点)" % args.public_out)
@@ -2221,6 +2402,7 @@ def main():
     from collections import Counter
     log("  地区: %s" % dict(Counter(it["cc"] or "??" for it in items).most_common(10)))
     n_resi = sum(1 for it in items if it.get("resi"))
+    n_gem = sum(1 for it in items if it.get("gemini"))
     log("  住宅 IP: %d 个（只认 %s 的家宽 ISP，已优先排列，见「🏠 住宅IP优选」组）"
         % (n_resi, "/".join(sorted({c.strip().upper() for c in args.resi_cc.split(",") if c.strip()})) or "全部"))
 
@@ -2229,8 +2411,9 @@ def main():
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S %z"),
         "candidates": len(merged),                       # 抓取去重后的候选
         "prefilter_alive": len(quick),                   # 过初筛（HTTP 可达）
-        "verified_both_ok": len(verified),               # 谷歌+YouTube+Gemini 都通（含仅 --keep-* 兜住的）
-        "verified_ngem": vstat.get("ngem", 0),           # 谷歌+YouTube 通但 Gemini 不通
+        "verified_both_ok": len(verified),               # 谷歌+YouTube 都通
+        "verified_ngem": vstat.get("ngem", 0),           # 仅 --require-gemini 时有值
+        "gemini_ok": n_gem,                              # 最终下发节点中 Gemini 可用数
         "residential_selected": n_resi,                  # 判定为住宅 IP 的下发节点数
         "verified_dead": vstat.get("dead", 0),
         "carry_loaded": len(prev),

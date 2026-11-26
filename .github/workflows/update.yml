@@ -64,33 +64,26 @@ jobs:
           else
             OUT_ARGS="--out out/flclash-free-nodes.yaml"
           fi
-          # 策略：地区筛选 + 真实代理链路并发压测（等价 clash-speedtest 的 download+并发），
-          #       砍掉“连不上”和“抖动大”的。不再按协议类型硬过滤 ——
-          #       实测 http 类型的节点可以只有 61ms、vless 也有能用的，按类型排除会误杀。
-          # --cn-types ""        : 不限协议（曾经用 ss,trojan，实测误杀了 http/vless）
-          # --cn-region asia_na  : 只保留 日/新/韩/台/港 + 美/加（归属未知的也留），其余剔除
-          # --max-per-region 50  : 每个地区只留最快的 50 个（美国/未知地区几百个垃圾节点大多国内超时）
-          # --max-delay 3000     : 机房延迟只做粗筛（机房侧绕路时能到 2238ms，但国内实测 222ms）
-          # --burst 6            : 每个节点同时开 6 条连接压测，成功率 ≥80%、抖动 ≤150ms 才算过
-          # --region-cap          : 地区配比按用户偏好：美/加/台放宽，日/韩/港收紧，其余默认 50
-          #   （US=80：Gemini 三站验证后美国节点质量参差，压到 80 只留最好的；住宅 IP 优先入选）
-          # --resi-cap 3          : 每个地区额外保底 3 个住宅 IP（不占地区配额，全局 ≤40），
-          #   否则“同地区更快的机房节点”会把家宽节点挤掉
-          # --resi-cc TW,CA       : 只有台湾/加拿大的家宽 IP 才算“住宅”。免费源里的住宅节点
-          #   78 个中有 29 个是美国、27 个是中国大陆、8 个韩国 —— 这些“别国家宽”对国内用户
-          #   没用，还会把「🏠 住宅IP优选」组塞满，所以只认 TW/CA（空字符串=不过滤）
-          # 源清单 2026-11-26 二次精简（16 → 6）：按留一法算过，anaer/Barabama/yy1588133/
-          # longyang/snakem982/ermaozi 这 6 家之外的所有源独有贡献都是 0，删掉只丢 7 个节点
-          # （0.2%），但每天少抓 9 次、少测几百个垃圾；其中 ripaojiedian(42%)、shaoyouvip(50%)
-          # 的日韩港占比最高，是典型的“日韩港垃圾源”
+          # 源清单 2026-11-26 深度优化：
+          # - 剔除 100% 为 http/socks5 开放代理的 longyang1233 和已断更的 clashfreenode.com
+          # - 纳入 share-daily/node 补充台湾 anytls 家宽节点
+          # - 排除 http/socks5 开放代理，避免拉低整体速度与稳定性
+          # - 分地区延迟门槛：北美(US/CA) ≤400ms、其他地区 ≤900ms、台湾 ≤2500ms（保障跨洋台家宽）
+          # - 真实 200KB 下载带宽 ≥150 KB/s、并发抖动 ≤200ms（台湾住宅豁免严苛跨洋门槛）
+          # - Gemini 移至压测后单测并入「🤖 Gemini优选」，不再误杀快速稳定的美/加/台节点
+          # - 同端口/同 IP 最多保留 2 个（--max-per-ip 2），杜绝同一 IP 克隆刷屏
+          # - 降低非台美加国家配额（TW=80, CA=80, US=80, SG=15, JP=8, KR=5, HK=5, 默认=10）
           python -u scripts/pipeline.py --workers 128 --rounds 2 --timeout 3000 \
-            --cn-types "" --cn-region asia_na --max-delay 3000 --max-per-region 50 \
-            --region-cap "US=80,CA=100,TW=80,SG=40,JP=15,KR=10,HK=10" \
-            --resi-cap 3 --max-resi-total 40 --resi-cc "TW,CA" \
-            --burst 6 --burst-min-ok 0.8 --burst-jitter 300 \
-            --min-nodes 3 \
+            --cn-types "" --exclude-types "http,socks5" \
+            --cn-region asia_na --max-delay 2500 \
+            --na-max-delay 400 --other-max-delay 900 --tw-max-delay 2500 \
+            --max-per-region 10 \
+            --region-cap "TW=80,CA=80,US=80,SG=15,JP=8,KR=5,HK=5" \
+            --resi-cap 5 --max-resi-total 40 --resi-cc "TW,CA" \
+            --burst 6 --burst-min-ok 0.8 --burst-jitter 200 --min-speed 150 \
+            --max-per-ip 2 --min-nodes 3 \
             --second-out out/flclash-broad.yaml \
-            --second-regions HK,TW,JP,KR,SG,CA $OUT_ARGS 2>&1 | tee pipeline.log
+            --second-regions TW,CA,HK,JP,KR,SG $OUT_ARGS 2>&1 | tee pipeline.log
 
       # 合并版含密钥，只推到私有 Gist；公开仓库里永远只有免费节点
       - name: 发布合并订阅到私有 Gist（可选）
