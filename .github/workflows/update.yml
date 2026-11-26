@@ -64,24 +64,21 @@ jobs:
           else
             OUT_ARGS="--out out/flclash-free-nodes.yaml"
           fi
-          # 源清单 2026-11-26 深度优化：
-          # - 剔除 100% 为 http/socks5 开放代理的 longyang1233 和已断更的 clashfreenode.com
-          # - 纳入 share-daily/node 补充台湾 anytls 家宽节点
-          # - 排除 http/socks5 开放代理，避免拉低整体速度与稳定性
-          # - 分地区延迟门槛：北美(US/CA) ≤400ms、其他地区 ≤900ms、台湾 ≤2500ms（保障跨洋台家宽）
-          # - 真实 200KB 下载带宽 ≥150 KB/s、并发抖动 ≤200ms（台湾住宅豁免严苛跨洋门槛）
-          # - Gemini 移至压测后单测并入「🤖 Gemini优选」，不再误杀快速稳定的美/加/台节点
-          # - 同端口/同 IP 最多保留 2 个（--max-per-ip 2），杜绝同一 IP 克隆刷屏
-          # - 降低非台美加国家配额（TW=80, CA=80, US=80, SG=15, JP=8, KR=5, HK=5, 默认=10）
+          # 策略（恢复最初国内实测可用率最高的 10 个核心源 + 4 个补充源，取消美国侧过严过滤）：
+          # - 仅排除明文无 TLS 的 http 开放代理与 socks5（保留 HTTPS-443 代理，如实测 61ms 的 172.64.x.x:443）
+          # - 恢复原始 --max-delay 3000 / --burst-jitter 300，关闭美国侧 --min-speed / --na-max-delay / --max-per-ip，
+          #   避免 GitHub 美国机房的延迟/带宽指标误杀实际国内可用的 Trojan/VLESS/CDN/加拿大节点
+          # - 台湾住宅 IP 独立保护（放宽并发、优先排序、--resi-cap 5 保底）
+          # - Gemini 移至压测后单测并归入「🤖 Gemini优选」，不误杀正常节点
+          # - 地区配额优先保障 台湾/加拿大/美国，适当降低日韩港新权重
           python -u scripts/pipeline.py --workers 128 --rounds 2 --timeout 3000 \
-            --cn-types "" --exclude-types "http,socks5" \
-            --cn-region asia_na --max-delay 2500 \
-            --na-max-delay 400 --other-max-delay 900 --tw-max-delay 2500 \
-            --max-per-region 10 \
-            --region-cap "TW=80,CA=80,US=80,SG=15,JP=8,KR=5,HK=5" \
+            --cn-types "" --exclude-types "http-plain,socks5" \
+            --cn-region asia_na --max-delay 3000 \
+            --max-per-region 30 \
+            --region-cap "TW=100,CA=100,US=120,SG=20,JP=15,HK=10,KR=10" \
             --resi-cap 5 --max-resi-total 40 --resi-cc "TW,CA" \
-            --burst 6 --burst-min-ok 0.8 --burst-jitter 200 --min-speed 150 \
-            --max-per-ip 2 --min-nodes 3 \
+            --burst 6 --burst-min-ok 0.8 --burst-jitter 300 \
+            --min-nodes 3 \
             --second-out out/flclash-broad.yaml \
             --second-regions TW,CA,HK,JP,KR,SG $OUT_ARGS 2>&1 | tee pipeline.log
 

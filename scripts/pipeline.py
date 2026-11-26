@@ -65,18 +65,21 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) clash/mihomo"}
 #     shaoyouvip/free、mfuu/FreeProxies、ripaojiedian/freenode
 #     （ripaojiedian / shaoyouvip 的日韩港占比 42%~50%，是典型的“日韩港垃圾源”）
 SOURCES = [
-    # 台湾 + 住宅 IP 主力：anaer 独家提供 3 个中华电信（Chunghwa）家宽 TW 节点，
-    # 全库唯一的 TW 住宅就出在 anaer 和 Barabama 这两家
-    ("anaer/Sub", "main", "clash.yaml"),
-    # 最大体量聚合库（1500+ 独立节点、CA 410 / US 246），TW 住宅贡献 1 个
-    ("Barabama/FreeNodes", "main", "nodes/merged.yaml"),
-    # 住宅 IP 密度最高的源之一（9 个住宅 / 137 条），且能补 TW
-    ("yy1588133/proxy-pool", "main", "clash.yaml"),
-    # 体量不大但独立贡献 52 条，且日韩港占比只有 6%
-    ("snakem982/proxypool", "main", "source/clash-meta-2.yaml"),
-    # 独立住宅密度不高（3/344），但去重后仍能补 1 个中华电信 TW 家宽，留着兜底
+    # 原始 10 个国内实测可用率最高的公开节点源（全部恢复）
     ("ermaozi/get_subscribe", "main", "subscribe/clash.yml"),
-    # 补充台湾 anytls 节点（其余 http 开放代理会被 --exclude-types 过滤）
+    ("ermaozi01/free_clash_vpn", "main", "subscribe/clash.yml"),
+    ("anaer/Sub", "main", "clash.yaml"),
+    ("ripaojiedian/freenode", "main", "clash"),
+    ("peasoft/NoMoreWalls", "master", "list.yml"),
+    ("mahdibland/ShadowsocksAggregator", "master", "Eternity.yml"),
+    ("cysk003/freeSub", "main", "clash.yaml"),
+    ("ts-sf/fly", "main", "clash"),
+    ("free18/v2ray", "main", "c.yaml"),
+    ("chengaopan/AutoMergePublicNodes", "master", "list.yml"),
+    # 补充：台湾住宅 IP 与高活跃聚合源
+    ("Barabama/FreeNodes", "main", "nodes/merged.yaml"),
+    ("yy1588133/proxy-pool", "main", "clash.yaml"),
+    ("snakem982/proxypool", "main", "source/clash-meta-2.yaml"),
     ("share-daily/node", "main", "clash.yaml"),
 ]
 
@@ -811,13 +814,13 @@ def _stress_chunk(exe, chunk, workdir, workers, burst, timeout_ms, min_ok_ratio,
             if not is_prot and jitter > jitter_ms:
                 return {"ok": len(good), "n": burst, "p50": p50, "p95": p95,
                         "jitter": jitter, "speed_kbps": 0, "pass": False}
-            # 真实下载测速（约 200KB）：过滤“204 秒回但下载限速/卡死”的假快节点
-            dl_ok, kbps, _got, _dl_ms = download_probe(port, max(timeout_ms, 6000))
-            if is_prot:
-                # 台湾住宅节点优先保障：能正常传输数据即可，不做严苛跨洋带宽/抖动一刀切
-                passed = dl_ok
+            # 仅在显式配置 --min-speed > 0 时才做下载测速（避免美国机房单线程测速误杀国内好用的 CDN/TLS 节点）
+            if min_speed > 0:
+                dl_ok, kbps, _got, _dl_ms = download_probe(port, max(timeout_ms, 6000))
+                passed = dl_ok if is_prot else (dl_ok and kbps >= min_speed)
             else:
-                passed = dl_ok and (min_speed <= 0 or kbps >= min_speed)
+                kbps = 0
+                passed = True
             return {"ok": len(good), "n": burst, "p50": p50, "p95": p95,
                     "jitter": jitter, "speed_kbps": kbps, "pass": passed}
 
@@ -1400,6 +1403,8 @@ def load_previous(path, limit=60, exclude_types=None):
         t = str(p.get("type") or "").lower()
         if t not in ALLOWED_TYPES or t in exclude_types or not p.get("server") or not p.get("port"):
             continue
+        if "http-plain" in exclude_types and t == "http" and not p.get("tls"):
+            continue
         nm = str(p.get("name") or "")
         m = re.search(r"·\s*(\d+)ms", nm)
         ms = int(m.group(1)) if m else 9999
@@ -1494,25 +1499,21 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
                               0 if x["carry"] else 1,
                               -x["hits"]))
 
-    # 同端口/同 IP 去重：避免聚合源把同一个 IP 用不同伪装 Host 塞 5 份占满配额
-    deduped, seen_ep, ip_cnt = [], set(), {}
-    for it in items:
-        p = it["node"]
-        ep = (str(p.get("server") or "").lower().strip(), int(p.get("port") or 0))
-        if ep in seen_ep:
-            continue
-        seen_ep.add(ep)
-        ip = str(it["ip"] or "").lower().strip()
-        is_tw_resi = it["resi"] and it["cc"] == "TW"
-        if max_per_ip > 0 and not is_tw_resi and ip:
-            ip_cnt[ip] = ip_cnt.get(ip, 0) + 1
-            if ip_cnt[ip] > max_per_ip:
-                continue
-        deduped.append(it)
-    if len(deduped) < len(items):
-        log("  同端点/同IP去重: 剔除 %d 个重复克隆，%d → %d"
-            % (len(items) - len(deduped), len(items), len(deduped)))
-    items = deduped
+    # 同 IP 上限（仅在显式传 --max-per-ip > 0 时启用；默认关闭以免误杀共享 Cloudflare CDN 入口的不同后端节点）
+    if max_per_ip > 0:
+        deduped, ip_cnt = [], {}
+        for it in items:
+            ip = str(it["ip"] or "").lower().strip()
+            is_tw_resi = it["resi"] and it["cc"] == "TW"
+            if not is_tw_resi and ip:
+                ip_cnt[ip] = ip_cnt.get(ip, 0) + 1
+                if ip_cnt[ip] > max_per_ip:
+                    continue
+            deduped.append(it)
+        if len(deduped) < len(items):
+            log("  同IP限额（≤%d）: 剔除 %d 个，%d → %d"
+                % (max_per_ip, len(items) - len(deduped), len(items), len(deduped)))
+        items = deduped
 
     # 每地区只留最快的 N 个（region_cap 按地区覆盖，resi_cap 额外保底台湾/加拿大住宅 IP）
     region_cap = region_cap or {}
@@ -1588,7 +1589,7 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
                 stamp, time.strftime("%z"), len(proxies) + len(sh),
                 "（自建 %d + 免费 %d）" % (len(sh), len(proxies)) if sh else ""),
             "# 数据来源: GitHub 上每日更新的公开免费节点库，合并去重后逐个实测：",
-            "#   ① 谷歌 (www.google.com/generate_204)、YouTube (www.youtube.com) 和 Gemini (gemini.google.com) 都能真打开；",
+            "#   ① 谷歌 (www.google.com/generate_204) 与 YouTube (www.youtube.com) 都能真打开（Gemini 通过者另入「🤖 Gemini优选」组）；",
             ("#   ② 上海探针（globalping.io）实测“上海 → 节点”RTT ≤ %dms，节点名里的数字就是上海延迟。"
              % DELAY_GATE_CN) if DELAY_GATE_CN else
             ("#   ② 机房实测延迟 ≤ %dms，并通过 %d 并发压测（成功率≥%.0f%%、抖动≤%dms）；"
@@ -1966,7 +1967,8 @@ def main():
             continue
         got = 0
         for p in normalize(doc["proxies"], src):
-            if exclude_types and str(p.get("type") or "").lower() in exclude_types:
+            t_p = str(p.get("type") or "").lower()
+            if exclude_types and (t_p in exclude_types or ("http-plain" in exclude_types and t_p == "http" and not p.get("tls"))):
                 continue
             k = dedupe_key(p)
             if k in seen:
