@@ -783,7 +783,8 @@ def verify_sites(exe, proxies, workdir, workers, rounds, timeout_ms, max_delay, 
       full  = 谷歌 + YouTube + Gemini 都通，延迟达标  -> 下发
       slow  = 三个都通但延迟超标                      -> 默认丢弃，--keep-slow 才保留
       gonly = 只有谷歌通（YouTube/Gemini 不通）       -> 默认丢弃，--keep-gonly 才保留
-      ngem  = 谷歌 + YouTube 通但 Gemini 不通（多为地区封锁，如香港入口）-> 默认丢弃，--keep-ngem 才保留
+      ngem  = 谷歌 + YouTube 通但 Gemini 不通（多为地区封锁，如香港入口）-> 默认丢弃，--keep-ngem 才保留；
+             例外：台加住宅 IP 默认豁免（见 --no-resi-ngem-exempt），它们在「🚫 无Gemini备用」组
     """
     for i, p in enumerate(proxies):
         if not p.get("__id"):
@@ -1445,7 +1446,9 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
 
     primary_items = [it for it in items if it["tier"] == "full"]
     primary_names = [it["name"] for it in primary_items]
-    resi_names = [it["name"] for it in primary_items if it.get("resi")]
+    # 住宅组收录所有档位里的住宅节点：台加家宽大多 Gemini 不通（ngem 档），
+    # 只收 full 档会让「🏠 住宅IP优选」变成空组 —— 而那正是用户最想用的那一组
+    resi_names = [it["name"] for it in items if it.get("resi")]
     all_names = [it["name"] for it in items]
     # 没通过完整验证的（延迟超标 / YouTube 不通）只在带 --keep-* 时才会存在，单独分组收纳
     extra = [(tier, label, [it["name"] for it in items if it["tier"] == tier])
@@ -1454,7 +1457,9 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
     extra = [x for x in extra if x[2]]
 
     regions = {}
-    for it in primary_items:
+    # 地区组用全部档位（含 ngem 豁免的台加住宅）：台湾节点绝大多数 Gemini 不通，
+    # 只按 full 档建组会让「🇹🇼 台湾」整组消失，用户就找不到想手动选的台湾节点了
+    for it in items:
         regions.setdefault(it["region"], []).append(it["name"])
     order = [lbl for _, lbl in REGION_ORDER if lbl in regions]
     order += [lbl for lbl in ("🇪🇺 欧洲", "🌍 其他") if lbl in regions]
@@ -1759,6 +1764,11 @@ def main():
     ap.add_argument("--keep-ngem", action="store_true",
                     help="保留谷歌+YouTube 通但 Gemini 打不开的节点（放进“🚫 无Gemini备用”组），默认丢弃。"
                          "注意：Gemini 对部分地区（如香港入口）封锁，开了这个香港节点会回到备用组")
+    ap.add_argument("--no-resi-ngem-exempt", dest="resi_ngem_exempt", action="store_false",
+                    default=True,
+                    help="关闭台加住宅 IP 的 Gemini 豁免。默认开启：实测免费源里的台加家宽几乎全被 "
+                         "Gemini 拒（Google 不认这些住宅出口），但用户要的正是这批家宽节点，"
+                         "全丢掉就等于没有住宅 IP；它们仍带「·无Gemini」标记，单独进备用组")
     ap.add_argument("--max-candidates", type=int, default=0,
                     help="只取前 N 个候选参与测速（调试用），0 = 全部")
     ap.add_argument("--selfhost", default="",
@@ -2134,6 +2144,8 @@ def main():
         return 1
 
     nodes_delay = {}
+    resi_cc = {c.strip().upper() for c in args.resi_cc.split(",") if c.strip()}
+    n_resi_exempt = 0
     for p in candidates:
         info = verified.get(p["__id"])
         if not info:
@@ -2143,10 +2155,21 @@ def main():
         if info["tier"] == "gonly" and not args.keep_gonly:
             continue
         if info["tier"] == "ngem" and not args.keep_ngem:
-            continue
+            # 台加住宅 IP 豁免：免费源里的台加家宽几乎全被 Gemini 拒（Google 不认这些住宅出口），
+            # 但用户要的就是这批家宽节点，全丢掉等于没有住宅 IP。保留但打上 ·无Gemini 标记，
+            # 只进「🏠 住宅IP优选」和「🚫 无Gemini备用」两组，不进主池。
+            g = geo.get(str(p.get("server")), {})
+            is_resi = classify_resi(g) is True and \
+                (not resi_cc or (g.get("cc") or "").upper() in resi_cc)
+            if not (args.resi_ngem_exempt and is_resi):
+                continue
+            n_resi_exempt += 1
         p["__tier"] = info["tier"]
         nodes_delay[p["__id"]] = {"delay": info["delay"], "hits": info["hits"],
                                   "tests": args.verify_rounds, "cn": info.get("cn")}
+    if n_resi_exempt:
+        log("  [豁免] %d 个台加住宅 IP 虽 Gemini 不通仍保留（--no-resi-ngem-exempt 可关闭）"
+            % n_resi_exempt)
     # 兜底：完整通过的太少时，自动补几个“能打开三个站、只是慢”的节点，
     # 免得某天门槛过严直接下发空订阅（它们会单独进「🐢 高延迟备用」，不进主池）
     if args.fallback_slow and len(nodes_delay) < args.min_nodes:
