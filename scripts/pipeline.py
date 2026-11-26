@@ -13,8 +13,12 @@
     6. 上海探针（globalping.io）实测“上海 → 节点”RTT ≤ --cn-max-delay（默认 200ms）
        —— 这一条才决定你在国内用起来快不快，节点名里的数字就是它
 
-另外每次构建会先复测上一版的节点（老节点优先）：上海 RTT ≤ --carry-max-delay
-（默认 150ms）的保留并排在订阅最前面，超标的淘汰，其余名额照常由抓取流程补足。
+筛选偏好：住宅 IP（家宽 ISP，按 isp/org/asn/rDNS 关键词启发式判定）优先入选并靠前
+排列，节点名带「·住宅」标记，另有「🏠 住宅IP优选」url-test 分组。排序只在同验证档内
+生效：住宅 > 老选手 > 机房，所以上一版留下的机房节点不会挤掉本轮抓到的家宽节点。
+
+另外每次构建会先复测上一版的节点：上海 RTT ≤ --carry-max-delay（默认 150ms）的保留，
+超标的淘汰，其余名额照常由抓取流程补足。
 
 用法:
     python scripts/pipeline.py                     # 默认输出 out/flclash-free-nodes.yaml
@@ -48,7 +52,12 @@ CACHE = os.path.join(ROOT, ".cache")
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) clash/mihomo"}
 
 # ---------------------------------------------------------------- 节点源
-# 只收 Clash / Mihomo 格式的公开订阅；失效的源会自动跳过，不影响整体
+# 只收 Clash / Mihomo 格式的公开订阅；失效的源会自动跳过，不影响整体。
+# 选源标准（2026-11-26 复核）：① 仍在更新（pushed_at 近 7 天）；② 去重后有独立贡献；
+# ③ 住宅 IP 占比尽量高。据此清掉了四类劣质源：
+#   - cysk003/freeSub：fork 且 2026-07-02 后停更，498 个独立节点里 494 个归属未知、0 住宅
+#   - ts-sf/fly、zhuhaiuk/free-nodes：全部节点都被 anaer/Barabama 等源覆盖，独立贡献 0
+#   - awesome-vpn/awesome-vpn：仅 27 个节点且全是机房 IP、0 住宅，体量不抵一次抓取
 SOURCES = [
     ("ermaozi/get_subscribe", "main", "subscribe/clash.yml"),
     ("ermaozi01/free_clash_vpn", "main", "subscribe/clash.yml"),
@@ -56,20 +65,16 @@ SOURCES = [
     ("ripaojiedian/freenode", "main", "clash"),
     ("peasoft/NoMoreWalls", "master", "list.yml"),
     ("mahdibland/ShadowsocksAggregator", "master", "Eternity.yml"),
-    ("cysk003/freeSub", "main", "clash.yaml"),
-    ("ts-sf/fly", "main", "clash"),
     ("free18/v2ray", "main", "c.yaml"),
     ("chengaopan/AutoMergePublicNodes", "master", "list.yml"),
     ("PuddinCat/BestClash", "main", "proxies.yaml"),
     ("yy1588133/proxy-pool", "main", "clash.yaml"),
     ("shaoyouvip/free", "main", "mihomo.yaml"),
-    ("zhuhaiuk/free-nodes", "main", "clash_config.yaml"),
     ("mfuu/FreeProxies", "master", "sub.yaml"),
     # 台湾节点补充源：大体量聚合库，TW 服务器占比可观（按服务器 IP 归属筛选）
     ("Barabama/FreeNodes", "main", "nodes/merged.yaml"),
     ("snakem982/proxypool", "main", "source/clash-meta-2.yaml"),
-    # 美/加补充源（用户偏好美加台）：awesome-vpn 每日更新精选，longyang 每日 01:00 实测筛选
-    ("awesome-vpn/awesome-vpn", "master", "clash.yaml"),
+    # 加拿大/美国补充源：longyang 每日 01:00 实测筛选，住宅 IP 占比最高（6/55）
     ("longyang1233/free-nodes-sub", "main", "clash.yaml"),
 ]
 
@@ -1108,20 +1113,27 @@ def geolocate(servers):
     for i in range(0, len(uniq), 100):
         chunk = uniq[i:i + 100]
         try:
-            body = json.dumps([{"query": ip, "fields": "status,country,countryCode,isp"} for ip in chunk]).encode()
+            # as/reverse/org 顺带拿来判“住宅 IP 还是机房 IP”（classify_resi 关键词启发式）
+            body = json.dumps([{"query": ip,
+                                "fields": "status,country,countryCode,isp,org,as,reverse"} for ip in chunk]).encode()
             req = urllib.request.Request("http://ip-api.com/batch", data=body,
                                          headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"})
             for ip, r in zip(chunk, json.loads(urllib.request.urlopen(req, timeout=40).read().decode())):
-                info[ip] = {"cc": (r.get("countryCode") or "").upper(), "isp": r.get("isp") or ""}
+                info[ip] = {"cc": (r.get("countryCode") or "").upper(), "isp": r.get("isp") or "",
+                            "org": r.get("org") or "", "as": r.get("as") or "",
+                            "reverse": r.get("reverse") or ""}
         except Exception:  # noqa: BLE001
             for ip in chunk:
                 try:
                     j = json.loads(http_get("https://ipwho.is/" + ip, timeout=15).decode())
+                    conn = j.get("connection") or {}
                     info[ip] = {"cc": (j.get("country_code") or "").upper(),
-                                "isp": (j.get("connection") or {}).get("isp") or ""}
+                                "isp": conn.get("isp") or "", "org": conn.get("org") or "",
+                                "as": str(conn.get("asn") or ""), "reverse": ""}
                 except Exception:  # noqa: BLE001
-                    info[ip] = {"cc": "", "isp": ""}
-    return {srv: info.get(ip) or {"cc": "", "isp": ""} for srv, ip in ips.items()}
+                    info[ip] = {"cc": "", "isp": "", "org": "", "as": "", "reverse": ""}
+    return {srv: info.get(ip) or {"cc": "", "isp": "", "org": "", "as": "", "reverse": ""}
+            for srv, ip in ips.items()}
 
 
 # ---------------------------------------------------------------- 8. 输出
@@ -1144,6 +1156,66 @@ REGION_PRIORITY = {"HK": 0, "TW": 0, "JP": 0, "SG": 0, "KR": 0, "CA": 1, "US": 2
 # 的入口根本不在它声称的地区（多半在美西中转），你连它反而要绕太平洋 —— 直接剔除。
 US_LOWER_BOUND = {"US": 15, "CA": 20, "JP": 110, "KR": 120, "HK": 145, "TW": 150,
                   "SG": 165, "GB": 85, "DE": 90, "NL": 90, "FR": 95, "RU": 130}
+
+# ---- 住宅 IP 启发式判定 ----
+# 数据来源只有 ip-api 免费字段（isp / org / as / reverse rDNS），没有官方的 hosting 标记，
+# 所以用关键词匹配。判定顺序刻意做成“先机房、后家宽、最后 rDNS”：
+#   1. isp 命中机房特征词 → 机房（isp 是 ip-api 对“网络归属方”最权威的判定）
+#   2. isp 命中家宽 ISP 名单 → 住宅
+#   3. org/as 命中机房特征词 → 机房（org 常是转售/母公司，如 Psychz 的 org 写 TELUS）
+#   4. rDNS 命中家宽特征（res./dyn/pool/dsl/…）→ 住宅
+#   都不中算“未知”，与机房同权排序（不加分不罚分）。
+# 宁可漏判成“未知”也不误判成“住宅”：误判会把机房节点塞进「🏠 住宅IP优选」组。
+DC_KEYWORDS = ("amazon", "aws", "google llc", "google cloud", "microsoft", "azure",
+               "digitalocean", "ovh", "hetzner", "linode", "akamai", "vultr",
+               "choopa", "contabo", "m247", "datacamp", "leaseweb", "serverius",
+               "scaleway", "oracle", "alibaba", "tencent", "huawei", "hostinger",
+               "namecheap", "godaddy", "buyvm", "frantech", "cogent", "lumen",
+               "level 3", "zayo", "gtt", "tata ", "psychz", "kamatera", "eons",
+               "hosting", "datacenter", "data center", "dedicated", "vps",
+               "colocation", "colocated", "cloud", "server", "idc", "noc",
+               "cdn", "proxy", "机房")
+# 只收“明确的居民宽带 ISP”，不收 telecom / communications / broadband / mobile 这类
+# 过宽的词 —— 它们会把 “Eons Data Communications” 之类的机房商误判成住宅。
+RESI_KEYWORDS = ("comcast", "charter", "spectrum", "cox ", "at&t", "verizon",
+                 "t-mobile", "tmobile", "us cellular", "rogers", "bell canada",
+                 "telus", "sasktel", "eastlink", "cogeco", "videotron",
+                 "chunghwa", "中華電信", "hinet", "taiwan mobile", "台湾大哥大",
+                 "aptg", "远传", "中华电信", "kddi", "softbank", "iij",
+                 "sk broadband", "sk telecom", "lg uplus", "lg u+", "kt corp",
+                 "singtel", "starhub", "myrepublic", "viewqwest", "pccw", "hkbn",
+                 "hong kong broadband", "hkt", "smartone", "china telecom",
+                 "china unicom", "china mobile", "cmcc", "unwired",
+                 "virgin media", "talktalk", "deutsche telekom", "telefonica",
+                 "movistar", "fastweb", "wind tre", "proximus", "telenor",
+                 "telia", "elisa", "vodafone", "telstra", "optus", "spark",
+                 "airtel", "bsnl", "true move", "ais ", "maxis", "unifi",
+                 "time dotcom", "biznet", "telkom", "indosat", "xl axiata",
+                 "globe telecom", "pldt", "viettel", "vnpt", "fpt telecom",
+                 "singnet", "first media", "jio")
+# rDNS 里出现这些才认住宅（家宽反向解析的典型形态）
+RESI_RDNS = ("res.", ".dyn.", "pool-", "pppoe", "dsl-", "cpe-", "customer-",
+             "client-", "ftth", "fios", ".home.", "broadband.")
+
+
+def classify_resi(info):
+    """根据 geolocate 拿到的 isp/org/as/reverse 启发式判断：True=住宅，False=机房，None=未知。"""
+    if not info:
+        return None
+    isp = str(info.get("isp") or "").lower()
+    org_as = " | ".join(str(info.get(k) or "") for k in ("org", "as")).lower()
+    rdns = str(info.get("reverse") or "").lower()
+    if any(k in isp for k in DC_KEYWORDS):
+        return False
+    if any(k in isp for k in RESI_KEYWORDS):
+        return True
+    if any(k in org_as for k in DC_KEYWORDS):
+        return False
+    if any(k in rdns for k in DC_KEYWORDS):
+        return False
+    if any(k in rdns for k in RESI_RDNS):
+        return True
+    return None
 
 
 def region_of(cc):
@@ -1269,7 +1341,7 @@ def second_build(candidates, verified, geo, path, regions):
 
 
 def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, write_txt=True,
-          max_per_region=0, region_cap=None):
+          max_per_region=0, region_cap=None, resi_cap=0, max_resi_total=40):
     selfhost = selfhost or []
     items = []
     for p in nodes:
@@ -1279,26 +1351,42 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
         items.append({"node": p, "cc": g.get("cc", ""), "delay": d["delay"], "hits": d["hits"],
                       "tier": p.get("__tier", "full"),
                       "carry": bool(p.get("__carry")),
+                      "resi": classify_resi(g) is True,
                       "cn": d.get("cn")})
-    # 老选手（上一版保留的）排最前，然后才是完整通过的，其余垫后
-    items.sort(key=lambda x: (0 if x["carry"] else 1,
-                              TIER_RANK.get(x["tier"], 3), x["delay"], -x["hits"]))
+    # 排序优先级：完整验证档 > 住宅 IP > 老选手 > 延迟。
+    # 住宅 IP 排在老选手之前（用户明确要求“优先保证住宅 ip”），老选手只压非住宅的新节点，
+    # 这样上一版留下的机房节点不会挤掉本轮抓到的家宽节点。
+    items.sort(key=lambda x: (TIER_RANK.get(x["tier"], 3),
+                              0 if x.get("resi") else 1,
+                              0 if x["carry"] else 1,
+                              x["delay"], -x["hits"]))
 
     # 每地区只留最快的 N 个（carry 老选手同样占额度，否则上一版的美国垃圾会成批续命）：
     # region_cap 可按地区覆盖（如美国/加拿大/台湾放宽、日韩港收紧），未列出的地区用 max_per_region。
+    # resi_cap：住宅 IP 在地区配额之外额外保留（每地区最多 N 个，全局最多 max_resi_total 个），
+    # 这样“同地区更快的机房节点”不会把家宽节点挤出去 —— 这是用户“优先保证住宅 IP”的硬保证，
+    # 光靠排序在配额满时仍会先被截断。
     region_cap = region_cap or {}
     if max_per_region > 0 or region_cap:
-        kept, quota = [], {}
+        kept, quota, resi_kept = [], {}, 0
         for it in items:
             cc = it["cc"] if it["cc"] in ISO2 else "XX"
             lim = region_cap.get(cc, max_per_region)
             quota[cc] = quota.get(cc, 0) + 1
             if quota[cc] <= lim:
                 kept.append(it)
-        log("  地区配额（默认 ≤%d%s）：剔除 %d 个慢节点，%d → %d"
+            elif it.get("resi") and resi_cap > 0 and resi_kept < max_resi_total \
+                    and quota.get(("resi", cc), 0) < resi_cap:
+                # 住宅节点超额保留：不占地区配额，单独计数
+                quota[("resi", cc)] = quota.get(("resi", cc), 0) + 1
+                resi_kept += 1
+                kept.append(it)
+        log("  地区配额（默认 ≤%d%s）：剔除 %d 个慢节点，%d → %d%s"
             % (max_per_region,
                "，覆盖 " + " ".join("%s=%d" % kv for kv in sorted(region_cap.items())) if region_cap else "",
-               len(items) - len(kept), len(items), len(kept)))
+               len(items) - len(kept), len(items), len(kept),
+               "；另超额保留 %d 个住宅节点（每区 ≤%d，全局 ≤%d）" % (resi_kept, resi_cap, max_resi_total)
+               if resi_kept else ""))
         items = kept
 
     counters, proxies = {}, []
@@ -1306,7 +1394,8 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
         cc = it["cc"] if it["cc"] in ISO2 else "XX"
         counters[cc] = counters.get(cc, 0) + 1
         code = cc if cc != "XX" else "未知"
-        tag = TIER_TAG.get(it["tier"], "")
+        tag = " ·住宅" if it.get("resi") else ""
+        tag += TIER_TAG.get(it["tier"], "")
         if DELAY_GATE_CN and it.get("cn") is None:
             tag += " ·未探针"      # 探针预算用完没量到的，名字上标出来，别和上海实测的混淆
         name = "%s %s-%02d · %dms%s" % (flag(cc), code, counters[cc], it["delay"], tag)
@@ -1322,6 +1411,7 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
 
     primary_items = [it for it in items if it["tier"] == "full"]
     primary_names = [it["name"] for it in primary_items]
+    resi_names = [it["name"] for it in primary_items if it.get("resi")]
     all_names = [it["name"] for it in items]
     # 没通过完整验证的（延迟超标 / YouTube 不通）只在带 --keep-* 时才会存在，单独分组收纳
     extra = [(tier, label, [it["name"] for it in items if it["tier"] == tier])
@@ -1402,7 +1492,8 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
             groups.append({"name": "🔀 智能切换", "type": "fallback", "url": check_url,
                            "interval": 300, "proxies": ["🏠 自建节点", "♻️ 自动选择"]})
         select_list = (["🔀 智能切换"] if sh else []) + (["🏠 自建节点"] if sh else []) \
-            + ["♻️ 自动选择", "🔯 故障转移"] + order + ["🎯 全球直连"] \
+            + ["♻️ 自动选择", "🔯 故障转移"] + (["🏠 住宅IP优选"] if resi_names else []) \
+            + order + ["🎯 全球直连"] \
             + [lbl for _, lbl, _ in extra] \
             + sh_names + all_names
         groups.insert(0, {"name": "🚀 节点选择", "type": "select", "proxies": select_list})
@@ -1413,6 +1504,11 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
         asia_names = [it["name"] for it in primary_items if it["cc"] in ASIA_STRICT]
         groups.append({"name": "🔯 故障转移", "type": "fallback", "url": check_url,
                        "interval": 300, "proxies": (asia_names or main_pool)[:20]})
+        if resi_names:
+            # 住宅 IP 专用 url-test 组：家宽 ISP 出口，Gemini/流媒体风控比机房 IP 友好
+            groups.append({"name": "🏠 住宅IP优选", "type": "url-test", "url": check_url,
+                           "interval": 300, "tolerance": 50, "lazy": False,
+                           "proxies": resi_names})
         for lbl in order:
             groups.append({"name": lbl, "type": "url-test", "url": check_url,
                            "interval": 300, "tolerance": 50, "proxies": regions[lbl]})
@@ -1570,8 +1666,13 @@ def main():
                     help="主订阅每个地区最多保留 N 个最快的节点（carry 老选手同样占额度），0=不限制。"
                          "聚合源里美国/未知地区动辄几百个且国内大多超时，建议 50")
     ap.add_argument("--region-cap", default="",
-                    help="按地区覆盖配额，格式 US=120,CA=100,TW=80,JP=15,KR=10,HK=10；"
+                    help="按地区覆盖配额，格式 US=80,CA=100,TW=80,JP=15,KR=10,HK=10；"
                          "未列出的地区沿用 --max-per-region")
+    ap.add_argument("--resi-cap", type=int, default=0,
+                    help="每个地区至少保留 N 个住宅 IP 节点（0=关闭）。住宅节点在该地区配额之外"
+                         "额外保留，避免被同地区更快的机房节点挤掉；总量仍受 --max-resi-total 限制")
+    ap.add_argument("--max-resi-total", type=int, default=40,
+                    help="住宅 IP 节点全局上限（防止住宅节点过多把订阅撑大），默认 40")
     ap.add_argument("--cn-check", dest="cn_check", action="store_true",
                     help="启用 globalping 上海探针实测（**默认关闭**：实测它与真实体验相关性差，"
                          "改用下面的并发压测 + 地区/协议筛选）")
@@ -2049,13 +2150,16 @@ def main():
                 region_cap[cc.strip().upper()] = int(n)
     items, proxies = build(alive, geo, args.out, args.workers, sh_nodes,
                            args.public_out or None, max_per_region=args.max_per_region,
-                           region_cap=region_cap)
+                           region_cap=region_cap, resi_cap=args.resi_cap,
+                           max_resi_total=args.max_resi_total)
     log("  输出: %s  (免费 %d + 自建 %d)" % (args.out, len(proxies), len(sh_nodes)))
     if args.public_out:
         log("  公开版: %s  (只含免费节点)" % args.public_out)
     log("  最快: %s   最慢: %s" % (items[0]["name"], items[-1]["name"]))
     from collections import Counter
     log("  地区: %s" % dict(Counter(it["cc"] or "??" for it in items).most_common(10)))
+    n_resi = sum(1 for it in items if it.get("resi"))
+    log("  住宅 IP: %d 个（家宽 ISP 启发式判定，已优先排列，见「🏠 住宅IP优选」组）" % n_resi)
 
     # 把这一轮的“漏斗”落成文件，方便事后判断是“节点质量差”还是“我们没测全”
     stats = {
@@ -2064,6 +2168,7 @@ def main():
         "prefilter_alive": len(quick),                   # 过初筛（HTTP 可达）
         "verified_both_ok": len(verified),               # 谷歌+YouTube+Gemini 都通（含仅 --keep-* 兜住的）
         "verified_ngem": vstat.get("ngem", 0),           # 谷歌+YouTube 通但 Gemini 不通
+        "residential_selected": n_resi,                  # 判定为住宅 IP 的下发节点数
         "verified_dead": vstat.get("dead", 0),
         "carry_loaded": len(prev),
         "cn_probe": {

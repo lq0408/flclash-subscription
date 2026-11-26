@@ -73,9 +73,15 @@ jobs:
           # --max-delay 3000     : 机房延迟只做粗筛（机房侧绕路时能到 2238ms，但国内实测 222ms）
           # --burst 6            : 每个节点同时开 6 条连接压测，成功率 ≥80%、抖动 ≤150ms 才算过
           # --region-cap          : 地区配比按用户偏好：美/加/台放宽，日/韩/港收紧，其余默认 50
+          #   （US=80：Gemini 三站验证后美国节点质量参差，压到 80 只留最好的；住宅 IP 优先入选）
+          # --resi-cap 3          : 每个地区额外保底 3 个住宅 IP（不占地区配额，全局 ≤40），
+          #   否则“同地区更快的机房节点”会把家宽节点挤掉
+          # 源清单 2026-11-26 精简：剔除停更的 cysk003/freeSub、零独立贡献的 ts-sf/fly 与
+          # zhuhaiuk/free-nodes、以及 0 住宅的 awesome-vpn，优先保留住宅 IP 占比高的源
           python -u scripts/pipeline.py --workers 128 --rounds 2 --timeout 3000 \
             --cn-types "" --cn-region asia_na --max-delay 3000 --max-per-region 50 \
-            --region-cap "US=120,CA=100,TW=80,SG=40,JP=15,KR=10,HK=10" \
+            --region-cap "US=80,CA=100,TW=80,SG=40,JP=15,KR=10,HK=10" \
+            --resi-cap 3 --max-resi-total 40 \
             --burst 6 --burst-min-ok 0.8 --burst-jitter 300 \
             --min-nodes 3 \
             --second-out out/flclash-broad.yaml \
