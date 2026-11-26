@@ -1692,22 +1692,22 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
             + sh_names + all_names
         groups.insert(0, {"name": "🚀 节点选择", "type": "select", "proxies": select_list})
         groups.append({"name": "♻️ 自动选择", "type": "url-test", "url": check_url,
-                       "interval": 180, "tolerance": 30, "lazy": False, "proxies": main_pool})
+                       "interval": 120, "tolerance": 30, "lazy": False, "proxies": main_pool})
         # 故障转移优先用高可用低延迟的优胜节点（主要为 TW/CA/US 及快 SG/JP）
         fb_names = [it["name"] for it in fast_sorted if it["cc"] in ("TW", "CA", "US", "SG", "JP")]
         groups.append({"name": "🔯 故障转移", "type": "fallback", "url": check_url,
-                       "interval": 300, "proxies": (fb_names or main_pool)[:20]})
+                       "interval": 180, "proxies": (fb_names or main_pool)[:20]})
         if resi_names:
             # 住宅 IP 专用 url-test 组：台湾住宅排在最前
             groups.append({"name": "🏠 住宅IP优选", "type": "url-test", "url": check_url,
-                           "interval": 180, "tolerance": 30, "lazy": False,
+                           "interval": 120, "tolerance": 30, "lazy": False,
                            "proxies": resi_names})
         if gemini_names:
             groups.append({"name": "🤖 Gemini优选", "type": "url-test", "url": check_url,
-                           "interval": 180, "tolerance": 30, "proxies": gemini_names})
+                           "interval": 120, "tolerance": 30, "lazy": False, "proxies": gemini_names})
         for lbl in order:
             groups.append({"name": lbl, "type": "url-test", "url": check_url,
-                           "interval": 180, "tolerance": 30, "proxies": regions[lbl]})
+                           "interval": 120, "tolerance": 30, "lazy": False, "proxies": regions[lbl]})
         groups.append({"name": "🎯 全球直连", "type": "select", "proxies": ["DIRECT"]})
         groups.append({"name": "🛑 广告拦截", "type": "select", "proxies": ["REJECT", "DIRECT"]})
         for _, lbl, names in extra:

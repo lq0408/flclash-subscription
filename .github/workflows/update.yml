@@ -64,13 +64,11 @@ jobs:
           else
             OUT_ARGS="--out out/flclash-free-nodes.yaml"
           fi
-          # 极致精简策略：仅保留 美/加/台 各最多 50 个，开启国内 globalping 实测与非 CDN 克隆去重，保障国内直连可用率
+          # 极致精简策略：仅保留 美/加/台 各最多 50 个，剔除所有 http/socks5 开放代理与非 CDN 克隆，由客户端 url-test(lazy:false) 实时自动切换最优节点
           python -u scripts/pipeline.py --workers 128 --rounds 2 --timeout 3000 \
             --regions "US,CA,TW" \
-            --cn-types "" --exclude-types "http-plain,socks5" \
+            --cn-types "" --exclude-types "http,socks5" \
             --cn-region all --max-delay 3000 --tw-max-delay 1500 \
-            --cn-check --cn-city "CN" --cn-max-delay 450 --cn-max-nodes 140 --cn-workers 6 \
-            --allow-degraded --keep-unmeasured \
             --max-per-region 50 \
             --region-cap "US=50,CA=50,TW=50" \
             --resi-cap 5 --max-resi-total 40 --resi-cc "TW,CA" \
