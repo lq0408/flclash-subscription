@@ -66,12 +66,29 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) clash/mihomo"}
 #     shaoyouvip/free、mfuu/FreeProxies、ripaojiedian/freenode
 #     （ripaojiedian / shaoyouvip 的日韩港占比 42%~50%，是典型的“日韩港垃圾源”）
 SOURCES = [
+    ("dongchengjie/airport", "main", "subs/merged/tested_within.yaml"),
+    ("10ium/VpnClashFaCollector", "main", "sub/final/all_vless/clash.yaml"),
+    ("10ium/VpnClashFaCollector", "main", "sub/final/all_cloudflare_clean_ip/clash.yaml"),
+    ("10ium/VpnClashFaCollector", "main", "sub/final/all_trojan/clash.yaml"),
+    ("10ium/VpnClashFaCollector", "main", "sub/final/all_hysteria2/clash.yaml"),
+    ("10ium/VpnClashFaCollector", "main", "sub/final/all_anytls/clash.yaml"),
+    ("10ium/VpnClashFaCollector", "main", "sub/final/all_tuic/clash.yaml"),
     ("Au1rxx/free-vpn-subscriptions", "main", "output/by-country/clash-US.yaml"),
     ("Au1rxx/free-vpn-subscriptions", "main", "output/by-country/clash-CA.yaml"),
     ("Au1rxx/free-vpn-subscriptions", "main", "output/by-country/clash-TW.yaml"),
+    ("chengaopan/AutoMergePublicNodes", "master", "list.meta.yml"),
+    ("chengaopan/AutoMergePublicNodes", "master", "snippets/nodes_TW.meta.yml"),
+    ("chengaopan/AutoMergePublicNodes", "master", "snippets/nodes_CA.meta.yml"),
+    ("chengaopan/AutoMergePublicNodes", "master", "snippets/nodes_US.meta.yml"),
     ("peasoft/NoMoreWalls", "master", "list.meta.yml"),
     ("SHUNZI88/proxysub", "main", "clean_proxies_only.yaml"),
     ("awesome-vpn/awesome-vpn", "master", "clash.yaml"),
+    ("yuan2pro/sub_merge", "main", "sub/merged_proxies_1.yaml"),
+    ("yuan2pro/sub_merge", "main", "sub/merged_proxies_2.yaml"),
+    ("yaney01/chromego_merge", "main", "sub/merged_proxies_new.yaml"),
+    ("yaney01/chromego_merge", "main", "sub/merged_proxies_new_2.yaml"),
+    ("shaoyouvip/free", "main", "mihomo.yaml"),
+    ("ripaojiedian/freenode", "main", "clash"),
     ("snakem982/proxypool", "main", "source/clash-meta-2.yaml"),
     ("anaer/Sub", "main", "clash.yaml"),
     ("Barabama/FreeNodes", "main", "nodes/merged.yaml"),
@@ -81,8 +98,6 @@ SOURCES = [
     ("share-daily/node", "main", "clash.yaml"),
     ("yy1588133/proxy-pool", "main", "clash.yaml"),
     ("free18/v2ray", "main", "c.yaml"),
-    ("chengaopan/AutoMergePublicNodes", "master", "list.yml"),
-    ("mahdibland/ShadowsocksAggregator", "master", "Eternity.yml"),
 ]
 
 # 非 GitHub 的每日源站：路径里的 {Y}/{M}/{D} 由 _daily_dates() 按北京日期填充。
@@ -160,36 +175,42 @@ def _daily_dates():
 
 
 # ---------------------------------------------------------------- 1. 抓取
+def _fetch_one_github(repo, branch, path):
+    tag = (repo + "__" + path).replace("/", "_")
+    errs = []
+    for url in mirrors_for(repo, branch, path):
+        host = urllib.parse.urlparse(url).netloc
+        try:
+            data = http_get(url, timeout=25, retries=1)
+        except Exception as e:  # noqa: BLE001
+            errs.append("%s -> %s" % (host, str(e)[:40]))
+            continue
+        txt = data.decode("utf-8", "ignore")
+        if not re.search(r"^\s*proxies\s*:", txt, re.M):
+            errs.append("%s -> 不是 Clash 格式" % host)
+            continue
+        with open(os.path.join(CACHE, tag + ".yaml"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(txt)
+        return True, repo, len(data), host, errs
+    return False, repo, 0, "", errs
+
+
 def fetch_sources():
     os.makedirs(CACHE, exist_ok=True)
     for old in glob.glob(os.path.join(CACHE, "*.yaml")):
         os.remove(old)
     ok, failed = [], []
     t0 = time.time()
-    for repo, branch, path in SOURCES:
-        tag = (repo + "__" + path).replace("/", "_")
-        errs = []
-        done = False
-        for url in mirrors_for(repo, branch, path):
-            host = urllib.parse.urlparse(url).netloc
-            try:
-                data = http_get(url, timeout=25, retries=1)
-            except Exception as e:  # noqa: BLE001
-                errs.append("%s -> %s" % (host, str(e)[:40]))
-                continue
-            txt = data.decode("utf-8", "ignore")
-            if not re.search(r"^\s*proxies\s*:", txt, re.M):
-                errs.append("%s -> 不是 Clash 格式" % host)
-                continue
-            with open(os.path.join(CACHE, tag + ".yaml"), "w", encoding="utf-8", newline="\n") as f:
-                f.write(txt)
-            log("  [ok]   %-38s %6.0f KB  (%s)" % (repo, len(data) / 1024, host))
-            ok.append((repo, len(data)))
-            done = True
-            break
-        if not done:
-            failed.append((repo, errs))
-            log("  [skip] %-38s %s" % (repo, " | ".join(errs)[:120]))
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futs = [ex.submit(_fetch_one_github, repo, branch, path) for repo, branch, path in SOURCES]
+        for f in futs:
+            is_ok, repo, size_b, host, errs = f.result()
+            if is_ok:
+                log("  [ok]   %-38s %6.0f KB  (%s)" % (repo, size_b / 1024, host))
+                ok.append((repo, size_b))
+            else:
+                failed.append((repo, errs))
+                log("  [skip] %-38s %s" % (repo, " | ".join(errs)[:120]))
 
     # 非 GitHub 的每日源站（路径里带日期）：今天没有就退回昨天
     for label, tpl in EXTRA_SOURCES:
@@ -252,6 +273,27 @@ def _is_ss_raw(p):
             and not str(p.get("cipher") or "").lower().startswith("2022-blake3"))
 
 
+BAD_TLDS = ("rkn", "local", "lan", "internal", "invalid", "test", "onion",
+            "localhost", "example", "corp", "home", "arpa")
+
+
+def _is_ip_literal(s):
+    s = str(s or "").strip()
+    if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", s):
+        return True
+    return ":" in s or (s.startswith("[") and s.endswith("]"))
+
+
+def _valid_domain_sni(s):
+    s = str(s or "").strip().rstrip(".")
+    if not s or _is_ip_literal(s) or "." not in s or _bad_host_str(s):
+        return False
+    tld = s.rsplit(".", 1)[-1].lower()
+    if len(tld) < 2 or not tld.isalpha() or tld in BAD_TLDS:
+        return False
+    return True
+
+
 def _bad_host_str(s):
     if not s:
         return False
@@ -266,16 +308,19 @@ def _bad_host_str(s):
 
 def normalize(proxies, src):
     kept = []
+    allow_protos = {"vless", "vmess", "trojan", "hysteria2", "hysteria", "tuic", "anytls", "ss", "wireguard"}
     for p in proxies:
         if not isinstance(p, dict):
             continue
         ptype = str(p.get("type", "")).lower()
-        if ptype not in ALLOWED_TYPES or ptype in ("ssr", "http", "socks5"):
+        if ptype not in allow_protos:
+            continue
+        if _is_ss_raw(p):
             continue
         if ptype in ("vless", "vmess") and not _has_tls(p):
             continue
         srv = str(p.get("server", "")).strip()
-        if not srv or srv.startswith(BAD_SERVER_PREFIX) or _bad_host_str(srv):
+        if not srv or srv.startswith(BAD_SERVER_PREFIX) or _bad_host_str(srv) or srv.lower().endswith(".ir"):
             continue
         try:
             port = int(p.get("port", 0))
@@ -285,12 +330,28 @@ def normalize(proxies, src):
             continue
         if ptype == "ss" and str(p.get("cipher") or "").lower() == "rc4-md5":
             continue
-        if _is_ss_raw(p) and (port == 19999 or "ZRpgaBeGxtENIXgvhpkZBKz9GnWRS2dYcx9O+a2iwN4=" in str(p.get("password") or "")):
-            continue
+        if ptype == "wireguard":
+            sl = srv.lower()
+            if sl.startswith(("162.159.192.", "162.159.193.", "162.159.195.")) or "engage.cloudflareclient.com" in sl:
+                continue
+            if port in (500, 4500, 2408, 1701):
+                continue
+            if not p.get("private-key") or not (p.get("public-key") or p.get("peers")):
+                continue
+        if ptype == "vless" and p.get("reality-opts"):
+            ro = p.get("reality-opts")
+            if not isinstance(ro, dict) or len(str(ro.get("public-key") or "").strip()) < 20:
+                continue
         ws = p.get("ws-opts") if isinstance(p.get("ws-opts"), dict) else {}
         sni_vals = (p.get("servername"), p.get("sni"), (ws.get("headers") or {}).get("Host"))
         if any(_bad_host_str(v) for v in sni_vals if v):
             continue
+        if ptype in ("vless", "vmess", "trojan", "hysteria2", "hysteria", "tuic", "anytls"):
+            eff_sni = (p.get("servername") or p.get("sni")
+                       or (ws.get("headers") or {}).get("Host")
+                       or (srv if not _is_ip_literal(srv) else ""))
+            if not _valid_domain_sni(eff_sni):
+                continue
         if ptype in ("vless", "trojan", "vmess") and port != 443 and (
                 _is_cdn_server(srv) or "saas.sin.fan" in srv.lower()):
             continue
@@ -304,6 +365,10 @@ def normalize(proxies, src):
         if bad:
             continue
         q = {k: v for k, v in p.items() if not str(k).startswith("__")}
+        if str(q.get("network") or "").lower() == "raw":
+            q["network"] = "tcp"
+        if ptype == "vless" and q.get("reality-opts") and not q.get("client-fingerprint"):
+            q["client-fingerprint"] = "chrome"
         q["__src"] = src
         kept.append(q)
     return kept
@@ -470,27 +535,31 @@ def write_test_config(path, proxies, port, ctl):
 
 
 def kernel_validate(exe, cfg_path, workdir, proxies):
-    """用 mihomo -t 反复剔除内核认为非法的节点，返回 (保留节点, 剔除节点)"""
-    removed = []
+    """用 mihomo -t 分片剔除内核认为非法的节点（每片 ≤500，支持大池），返回 (保留节点, 剔除节点)"""
+    kept, removed = [], []
     port, ctl = port_pair()
-    for _ in range(300):
-        write_test_config(cfg_path, proxies, port, ctl)  # -t 只校验，不真正监听端口
-        r = subprocess.run([exe, "-t", "-f", cfg_path, "-d", workdir],
-                           capture_output=True, text=True, encoding="utf-8", errors="ignore")
-        out = (r.stdout or "") + (r.stderr or "")
-        if r.returncode == 0 and "test failed" not in out:
-            return proxies, removed
-        m = re.search(r'msg="proxy (\d+): ([^"]+)"', out)
-        if not m:
-            log("  内核报错无法定位节点:\n" + out[-800:])
-            return proxies, removed
-        idx = int(m.group(1))
-        if idx >= len(proxies):
-            return proxies, removed
-        victim = proxies[idx]
-        removed.append((victim.get("type"), victim.get("server"), m.group(2)))
-        proxies = proxies[:idx] + proxies[idx + 1:]
-    return proxies, removed
+    chunk_size = 500
+    for off in range(0, len(proxies), chunk_size):
+        chunk = proxies[off:off + chunk_size]
+        for _ in range(chunk_size):
+            write_test_config(cfg_path, chunk, port, ctl)  # -t 只校验，不真正监听端口
+            r = subprocess.run([exe, "-t", "-f", cfg_path, "-d", workdir],
+                               capture_output=True, text=True, encoding="utf-8", errors="ignore")
+            out = (r.stdout or "") + (r.stderr or "")
+            if r.returncode == 0 and "test failed" not in out:
+                break
+            m = re.search(r'msg="proxy (\d+): ([^"]+)"', out)
+            if not m:
+                log("  内核报错无法定位节点:\n" + out[-800:])
+                break
+            idx = int(m.group(1))
+            if idx >= len(chunk):
+                break
+            victim = chunk[idx]
+            removed.append((victim.get("type"), victim.get("server"), m.group(2)))
+            chunk = chunk[:idx] + chunk[idx + 1:]
+        kept.extend(chunk)
+    return kept, removed
 
 
 def free_port():
@@ -554,7 +623,7 @@ def measure(exe, proxies, workdir, workers, rounds, timeout_ms, test_url):
         # 诊断：内核到底认到几个代理？直连能不能通？—— 排查“0 存活”时非常关键
         try:
             api = json.loads(urllib.request.urlopen("http://127.0.0.1:%d/proxies" % ctl, timeout=10).read())
-            visible = [k for k in api.get("proxies", {}) if k.startswith("n") and len(k) == 5]
+            visible = [k for k in api.get("proxies", {}) if k.startswith("n") and k[1:].isdigit()]
             log("  内核可见代理: %d / %d" % (len(visible), len(proxies)))
         except Exception as e:  # noqa: BLE001
             log("  [warn] 读取 /proxies 失败: %s" % str(e)[:100])
@@ -800,6 +869,14 @@ def download_probe(port, timeout_ms=5000):
         return False, 0, 0, int((time.time() - t0) * 1000)
 
 
+def _probe_gemini_once_or_retry(port, timeout_ms):
+    t_ms = max(timeout_ms, 9000)
+    ok_m, c, ms, err_tag = http_probe(port, "gemini", t_ms)
+    if not ok_m and not str(err_tag or "").startswith("BLOCKED:"):
+        ok_m, c, ms, err_tag = http_probe(port, "gemini", t_ms)
+    return ok_m, c, ms, err_tag
+
+
 def probe_gemini_batch(exe, proxies, workdir, workers, timeout_ms):
     """对通过压测/测速的最终候选单独检测 Gemini 可达性，不淘汰节点，仅用于标记和组建「🤖 Gemini优选」"""
     if not proxies:
@@ -823,8 +900,8 @@ def probe_gemini_batch(exe, proxies, workdir, workers, timeout_ms):
             ok, _c, _m, _e = http_probe(reject_port, "google", min(timeout_ms, 5000))
             if ok:
                 continue
-            with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
-                futs = {ex.submit(http_probe, port, "gemini", max(timeout_ms, 7000)): p["__id"]
+            with ThreadPoolExecutor(max_workers=max(1, min(workers, 32))) as ex:
+                futs = {ex.submit(_probe_gemini_once_or_retry, port, timeout_ms): p["__id"]
                         for p, port in zip(chunk, ports)}
                 for f in as_completed(futs):
                     ok_m, _c, ms, err_tag = f.result()
@@ -1613,18 +1690,25 @@ def second_build(candidates, verified, geo, path, regions, resi_cc=None):
     return path
 
 
+CDN_PREFIXES = (
+    "172.64.", "172.65.", "172.66.", "172.67.", "172.68.", "172.69.", "172.70.", "172.71.",
+    "104.16.", "104.17.", "104.18.", "104.19.", "104.20.", "104.21.", "104.22.", "104.23.",
+    "104.24.", "104.25.", "104.26.", "104.27.", "104.28.", "104.29.", "104.30.", "104.31.",
+    "162.158.", "162.159.", "188.114.", "141.101.", "108.162.", "190.93.", "197.234.", "198.41.",
+    "8.6.112.", "8.35.211.", "8.39.204.",
+)
+
+
 def _is_cdn_server(srv):
     s = str(srv or "").lower().strip()
-    return s.startswith(("172.64.", "172.67.", "104.16.", "104.17.", "104.18.", "104.19.",
-                         "104.20.", "104.21.", "104.22.", "104.24.", "104.25.", "104.26.",
-                         "104.27.", "162.159.", "188.114.")) or "cloudflare" in s
+    return s.startswith(CDN_PREFIXES) or "cloudflare" in s or "fastly" in s or "cloudfront" in s
 
 
 def china_proto_penalty(p):
-    """按国内实测存活率打分（附加延迟惩罚 ms）：抗 DPI 协议（AnyTLS/Hysteria2/TUIC/Reality/xhttp/ss+plugin）排最前，裸 SS 重罚。"""
+    """按国内实测存活率打分（附加延迟惩罚 ms）：抗 DPI 协议（AnyTLS/Hysteria/Hysteria2/TUIC/Reality/xhttp/ss+plugin）排最前。"""
     t = str(p.get("type") or "").lower()
     net = str(p.get("network") or "tcp").lower()
-    if t in ("anytls", "hysteria2", "tuic"):
+    if t in ("anytls", "hysteria2", "hysteria", "tuic"):
         return 0
     if t == "vless" and p.get("reality-opts"):
         return 0
@@ -1695,13 +1779,16 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
         p = it["node"]
         srv = str(p.get("server") or "").lower().strip()
         port = int(p.get("port") or 0)
-        if _is_cdn_server(srv) or str(p.get("network") or "").lower() == "ws":
+        ptype = str(p.get("type") or "").lower()
+        net = str(p.get("network") or "").lower()
+        if _is_cdn_server(srv) or net in ("ws", "xhttp", "splithttp", "grpc", "h2", "httpupgrade") or ptype == "anytls":
             ws = p.get("ws-opts") if isinstance(p.get("ws-opts"), dict) else {}
             host_sni = str(p.get("servername") or p.get("sni")
                            or (ws.get("headers") or {}).get("Host") or "").lower().strip()
-            ep_key = (srv, port, host_sni)
+            path_opt = str(ws.get("path") or "").strip()
+            ep_key = (ptype, srv, port, host_sni, path_opt)
         else:
-            ep_key = (srv, port)
+            ep_key = (ptype, srv, port)
         if ep_key in seen_ep:
             continue
         seen_ep.add(ep_key)
@@ -2178,7 +2265,8 @@ def main():
     for fn in sorted(glob.glob(os.path.join(CACHE, "*.yaml"))):
         src = os.path.basename(fn)
         try:
-            doc = yaml.safe_load(open(fn, encoding="utf-8"))
+            txt_raw = open(fn, encoding="utf-8").read().replace("!<str>", "!!str")
+            doc = yaml.safe_load(txt_raw)
         except Exception as e:  # noqa: BLE001
             log("  [warn] %s 解析失败: %s" % (src, str(e)[:60]))
             continue
@@ -2246,8 +2334,12 @@ def main():
             srv_s = str(p.get("server"))
             entry_cc = (geo.get(srv_s, {}).get("cc") or "").upper()
             ptype_s = str(p.get("type") or "").lower()
+            net_s = str(p.get("network") or "").lower()
+            nm_s = str(p.get("name") or "")
             if (entry_cc in want_regions or entry_cc == ""
-                    or _is_cdn_server(srv_s) or ptype_s in ("wireguard", "anytls")):
+                    or _is_cdn_server(srv_s) or ptype_s in ("wireguard", "anytls")
+                    or (net_s in ("ws", "xhttp", "splithttp", "grpc") and not _is_ip_literal(srv_s))
+                    or any(tag in nm_s for tag in ("US", "CA", "TW", "美国", "加拿大", "台湾", "🇺🇸", "🇨🇦", "🇹🇼"))):
                 kept_pre.append(p)
         candidates = kept_pre
         log("  地区预筛（%s）: %d → %d（剔除 %d 个非目标地区直连节点，用时 %.1fs）"
@@ -2404,6 +2496,9 @@ def main():
             if p["__id"] not in keep_ids:
                 verified.pop(p["__id"], None)
         candidates = probe_pool
+
+    # 仅对已通过双站验证的候选做并发压测，避免在死节点上浪费并发端口与时间
+    candidates = [p for p in candidates if p["__id"] in verified]
 
     # ---- 并发压测 + 真实带宽测速：砍掉“单连正常、并发就废”及“限速卡死”的节点 ----
     tw_resi_ids = {
@@ -2683,25 +2778,6 @@ def main():
             alive = [p for p in alive if p["__id"] not in blocked_ids]
             log("  Gemini 地区封锁清理: 剔除 %d 个“送中/不支持地区”节点，剩余 %d 个"
                 % (len(blocked_ids), len(alive)))
-        # 若某地区已有 >=5 个 Gemini 可用节点，也顺带清理未通过 Gemini 的超时节点；不足 5 个的地区仅降为 ngem
-        kept_after_gem = []
-        dropped_non_gem = 0
-        for p in alive:
-            pid = p["__id"]
-            if nodes_delay[pid]["gemini"]:
-                kept_after_gem.append(p)
-                continue
-            cc_g = (_geo_of(p, geo).get("cc") or "").upper()
-            if gem_by_cc.get(cc_g, 0) >= 5 and len(alive) - dropped_non_gem > args.min_nodes:
-                nodes_delay.pop(pid, None)
-                dropped_non_gem += 1
-            else:
-                p["__tier"] = "ngem"
-                kept_after_gem.append(p)
-        if dropped_non_gem:
-            alive = kept_after_gem
-            log("  Gemini 质量精简: 在充足地区额外淘汰 %d 个 Gemini 不通节点，剩余 %d 个"
-                % (dropped_non_gem, len(alive)))
 
     log("[9/9] 生成配置并校验")
     sh_nodes = load_selfhost(args.selfhost)
