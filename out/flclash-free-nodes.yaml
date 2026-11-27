@@ -1,9 +1,9 @@
 # FLClash / Mihomo 订阅 — 免费公共节点
-# 生成时间: 2026-11-27 15:03 (UTC+0000)   节点: 27
+# 生成时间: 2026-11-27 15:32 (UTC+0000)   节点: 46
 # 数据来源: GitHub 上每日更新的公开免费节点库，合并去重后逐个实测：
 #   ① 谷歌 (www.google.com/generate_204) 与 YouTube (www.youtube.com) 都能真打开（Gemini 通过者另入「🤖 Gemini优选」组）；
-#   ② 机房实测延迟 ≤ 3000ms，并通过 4 并发压测（成功率≥75%、抖动≤800ms）；节点名里的数字是机房延迟。
-#   其中 13 个是上一版留下的老节点（本轮复测仍然可用，排在最前）
+#   ② 机房实测延迟 ≤ 3000ms，并通过 3 并发压测（成功率≥66%、抖动≤1200ms）；节点名里的数字是机房延迟。
+#   其中 4 个是上一版留下的老节点（本轮复测仍然可用，排在最前）
 # 本文件由 GitHub Actions 自动生成，请勿手工修改
 
 mixed-port: 7890
@@ -61,84 +61,79 @@ dns:
       - "https://1.12.12.12/dns-query"
 proxies:
 -
-  ip: 172.16.0.2/32
-  mtu: 1380
-  name: 🇺🇸 US-01 · 74ms
-  port: 3581
-  presharedkey: ""
-  private-key: "2FaqTm+aXdVK00dvbeuMW/t741BWYu9lNOOVtMI4R3Y="
-  public-key: "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
-  reserved:
-    - 80
-    - 103
-    - 64
-  server: 162.159.192.11
-  type: wireguard
+  type: vless
+  server: 156.229.167.109
+  port: 8443
+  uuid: eb8c97f7-a154-4442-91b0-54c0d055ad0b
   udp: true
--
-  ip: 172.16.0.2/32
-  keepalive: 5
-  mtu: 1280
-  persistent-keepalive: 5
-  port: 500
-  private-key: "mHj04J164X9hgzAVq4BlB0hc/SK3QPbgl7JF+/anXU0="
-  public-key: "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
-  reserved:
-    - 99
-    - 166
-    - 252
-  server: 162.159.192.6
-  type: wireguard
-  udp: true
-  wnoise: quic
-  wnoisecount: 5
-  wnoisedelay: 5
-  wpayloadsize: 40-90
-  name: 🇺🇸 US-02 · 120ms
--
-  ip: 172.16.0.2/32
-  keepalive: 5
-  mtu: 1280
-  name: 🇺🇸 US-03 · 143ms
-  persistent-keepalive: 5
-  port: 4500
-  private-key: "6LvJU33ZnWgR0r4A51ApYLHh+AT4v7Ft/SZ7vZHml3Y="
-  public-key: "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
-  reserved:
-    - 128
-    - 217
-    - 102
-  server: 162.159.192.6
-  type: wireguard
-  udp: true
-  wnoise: quic
-  wnoisecount: 5
-  wnoisedelay: 5
-  wpayloadsize: 40-90
--
-  password: nwilryafgkyvuxauc8pz
-  port: 50875
-  server: 69.164.240.85
+  tls: true
+  servername: github.githubassets.com
+  sni: github.githubassets.com
   skip-cert-verify: true
-  sni: ""
-  type: trojan
-  udp: true
-  name: 🇺🇸 US-04 · 160ms
--
-  client-fingerprint: random
-  flow: xtls-rprx-vision
-  name: 🇺🇸 US-05 · 242ms
-  network: tcp
-  port: 23576
+  client-fingerprint: chrome
   reality-opts:
-    public-key: 1y5h2FGWKXTJ9xLPCqPo6Mw7RxoZzh6fGkEQKNxpZ3s
-    short-id: ""
-  server: ww13.levikogjgfdd.ir
-  servername: fuck.rkn
+    public-key: 4g6gX0ueJap7pY_iTDx23h6bzo3KIOTcFzP1Uacn0QA
+    short-id: 4ad2e4e660550e43
+  name: 🇺🇸 US-01 · 140ms
+-
+  name: 🇺🇸 US-02 · 137ms
+  client-fingerprint: chrome
+  network: tcp
+  port: 443
+  server: 216.106.185.158
+  sub_tag: M003-260806
   tls: true
   type: vless
   udp: true
-  uuid: 48ff2b70-e180-582f-8866-d9a2edeed5f5
+  uuid: 03fcc618-b93d-6796-6aed-8a38c975d581
+  xudp: true
+  packet-encoding: xudp
+  servername: kuruish.org
+-
+  name: 🇺🇸 US-03 · 183ms
+  password: "gf1:gfhysteria2024"
+  port: 443
+  server: 66.94.121.46
+  skip-cert-verify: true
+  sni: vk.com
+  type: hysteria2
+-
+  name: 🇺🇸 US-04 · 187ms
+  type: wireguard
+  server: 8.6.112.141
+  port: 3476
+  ip: 172.16.0.2/32
+  ipv6: "2606:4700:110:8af2:447b:a9b9:b420:ebff/128"
+  mtu: 1420
+  private-key: "eGpcqvonUvA7/m1lcaERbf2opGESbp375ieSliLc3WU="
+  public-key: "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
+  udp: true
+-
+  name: 🇺🇸 US-05 · 284ms
+  network: ws
+  port: 443
+  server: x.m-90.xyz
+  sni: x.m-90.xyz
+  tls: true
+  type: vless
+  uuid: eee8ae65-bc48-438f-a606-a96f10bfb3b8
+  ws-opts:
+    headers:
+      Host: x.m-90.xyz
+    path: t.me/TEAMNETGRATISCOL
+-
+  name: 🇺🇸 US-06 · 375ms
+  type: hysteria2
+  server: 198.247.124.187
+  port: 23456
+  password: dongtaiwang.com
+  up: 10
+  down: 10
+  sni: www.bing.com
+  skip-cert-verify: true
+  alpn:
+    - h3
+  udp: true
 -
   server: 188.114.98.0
   port: 443
@@ -155,37 +150,68 @@ proxies:
     headers:
       Host: x.m-90.xyz
   udp: true
-  name: 🇺🇸 US-06 · 290ms
+  name: 🇺🇸 US-07 · 479ms
 -
-  type: vmess
-  server: 169.197.142.68
-  port: 1270
-  cipher: auto
-  uuid: 5c040f1d-45db-43bd-8d46-e4950e433735
-  alterId: 0
-  tls: true
+  name: 🇺🇸 US-08 · 435ms
+  type: hysteria
+  server: 137.175.82.41
+  port: 20022
+  auth-str: dongtaiwang.com
+  protocol: udp
+  up: 11
+  down: 55
+  sni: bing.com
   skip-cert-verify: true
+  fast-open: true
+  alpn:
+    - h3
+  recv-window-conn: 57671680
+  recv-window: 230686720
+  disable_mtu_discovery: true
+-
+  name: 🇨🇦 CA-01 · 386ms
+  client-fingerprint: chrome
+  encryption: none
   network: tcp
-  name: 🇺🇸 US-07 · 239ms
--
-  name: 🇺🇸 US-08 · 550ms
-  password: "gf1:gfhysteria2024"
   port: 443
-  server: 66.94.121.46
+  server: kuruish.org
+  sub_tag: M003-260806
+  tls: true
+  type: vless
+  udp: true
+  uuid: 03fcc618-b93d-6796-6aed-8a38c975d581
+  xudp: true
+  packet-encoding: xudp
+  servername: kuruish.org
+-
+  type: anytls
+  name: 🇹🇼 TW-01 · 646ms ·住宅
+  server: rtifgjdr.df6h451rh.xin
+  port: 443
+  password: 2902c46c8493
+  tls: true
+  servername: docs.microsoft.com
+  sni: docs.microsoft.com
   skip-cert-verify: true
-  sni: ""
+-
+  name: 🇹🇼 TW-02 · 640ms
+  password: H7mP2xY9kJ4nQ8wR5tF6vB3z
+  port: 443
+  server: 103.115.109.49
+  skip-cert-verify: true
+  sni: t.me
   type: hysteria2
 -
-  cipher: chacha20-ietf-poly1305
-  password: DGjtV63aPW3E
+  name: 🇹🇼 TW-03 · 845ms ·住宅
+  type: anytls
+  server: mfjh645drfj1dr6j5.df6h451rh.xin
   port: 443
-  server: 67.220.73.247
-  sub_tag: M003-260806
-  type: ss
   udp: true
-  name: 🇺🇸 US-09 · 66ms
+  password: 0324fbc29561
+  client-fingerprint: chrome
+  sni: px.ads.linkedin.com
+  skip-cert-verify: true
 -
-  name: 🇺🇸 US-10 · 602ms
   server: 23.237.202.252
   port: 443
   type: vless
@@ -200,86 +226,22 @@ proxies:
     path: /
     mode: auto
   udp: true
+  name: 🇺🇸 US-09 · 533ms
 -
-  cipher: aes-128-gcm
-  password: shadowsocks
-  port: 443
-  server: 37.19.198.243
-  type: ss
-  udp: true
-  name: 🇺🇸 US-11 · 99ms
--
-  cipher: aes-128-gcm
-  name: 🇺🇸 US-12 · 87ms
-  password: shadowsocks
-  port: 443
-  server: 156.146.38.168
-  type: ss
-  udp: true
--
-  cipher: chacha20-ietf-poly1305
-  password: PmCqK98WqhSC
-  port: 443
-  server: 134.195.198.163
-  sub_tag: M003-260806
-  type: ss
-  udp: true
-  name: 🇨🇦 CA-01 · 153ms
--
-  cipher: aes-128-gcm
-  password: shadowsocks
-  port: 443
-  server: 149.22.95.183
-  type: ss
-  udp: true
-  name: 🇨🇦 CA-02 · 202ms
--
-  cipher: aes-256-gcm
-  password: kDWvXYZoTBcGkC4
-  port: 8882
-  server: 51.222.136.236
-  type: ss
-  udp: true
-  name: 🇨🇦 CA-03 · 331ms
--
-  password: H7mP2xY9kJ4nQ8wR5tF6vB3z
-  port: 443
-  server: 103.115.109.49
-  skip-cert-verify: true
-  sni: 103.115.109.49
-  type: hysteria2
-  name: 🇹🇼 TW-01 · 739ms
--
-  name: 🇺🇸 US-13 · 681ms
-  type: vless
-  network: ws
-  server: 38.107.236.166
-  port: 8443
-  uuid: 48572af1-d091-457b-a86e-4a457e99927f
-  servername: 3h-unitedstates3.09vpn.com
-  skip-cert-verify: true
-  tls: true
-  udp: true
-  packet-encoding: xudp
-  ws-opts:
-    headers:
-      Host: 3h-unitedstates3.09vpn.com
-    path: /vless/
--
+  name: 🇺🇸 US-10 · 1098ms
+  type: wireguard
+  server: 8.6.112.246
+  port: 1180
   ip: 172.16.0.2/32
   ipv6: "2606:4700:110:8e4e:939b:b987:39aa:c46c/128"
   mtu: 1280
-  port: 8742
   private-key: "OEysS/3kryZt7O/RobQFlmPatDWuUl9bwef0IoMX/Uo="
   public-key: "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
   reserved:
     - 0
     - 0
     - 0
-  server: 8.6.112.207
-  type: wireguard
   udp: true
-  name: 🇺🇸 US-14 · 1120ms
 -
   password: 2902c46c8493
   port: 443
@@ -287,65 +249,44 @@ proxies:
   skip-cert-verify: true
   sni: px.ads.linkedin.com
   type: anytls
-  name: 🇹🇼 TW-02 · 946ms ·住宅
+  name: 🇹🇼 TW-04 · 914ms ·住宅
 -
-  name: 🇹🇼 TW-03 · 1198ms ·住宅
-  server: rtifgjdr.df6h451rh.xin
+  name: 🇺🇸 US-11 · 498ms
+  alpn:
+    - ""
+  alterId: 64
+  cipher: auto
+  network: ws
+  port: 30004
+  server: 38.11.69.48
+  skip-cert-verify: false
+  sub_tag: F003-260618
+  tls: true
+  type: vmess
+  udp: true
+  uuid: 418048af-a293-4b99-9b0c-98ca3580dd24
+  ws-opts:
+    headers:
+      Host: www.83761815.xyz
+    path: /path/1698843555400
+  xudp: true
+  packet-encoding: xudp
+  servername: www.83761815.xyz
+-
+  name: 🇹🇼 TW-05 · 1005ms ·住宅
+  server: a54ge.df6h451rh.xin
   port: 443
   type: anytls
-  password: 2902c46c8493
+  password: 0324fbc29561
   client-fingerprint: chrome
   udp: true
   sni: docs.microsoft.com
   skip-cert-verify: true
 -
-  type: vless
-  server: 156.229.167.109
-  port: 8443
-  uuid: eb8c97f7-a154-4442-91b0-54c0d055ad0b
-  udp: true
-  tls: true
-  servername: github.githubassets.com
-  sni: github.githubassets.com
-  skip-cert-verify: true
-  client-fingerprint: chrome
-  reality-opts:
-    public-key: 4g6gX0ueJap7pY_iTDx23h6bzo3KIOTcFzP1Uacn0QA
-    short-id: 4ad2e4e660550e43
-  name: 🇺🇸 US-15 · 806ms
--
-  fingerprint: ""
-  name: 🇹🇼 TW-04 · 1165ms ·住宅
-  password: 0324fbc29561
-  port: 443
-  server: mfjh645drfj1dr6j5.df6h451rh.xin
-  skip-cert-verify: true
-  sni: px.ads.linkedin.com
-  type: anytls
-  udp: true
-  username: 0324fbc29561
--
-  client-fingerprint: edge
-  grpc-opts:
-    grpc-service-name: 99f2107b03f8
-  name: 🇺🇸 US-16 · 1414ms
-  network: grpc
-  packet-encoding: xudp
-  port: 443
-  reality-opts:
-    public-key: cO3wYHISTeorXcM8ffaDCDdqZ-olBQL-GyZqb-W7rTk
-    short-id: bd8f712209a9c283
-  server: 162.35.101.177
-  servername: 0592efg.us8.h1clayd.click
-  tls: true
-  type: vless
-  uuid: cda0862a-0f87-4be9-8ed8-1d0c9e382839
-  x-toolall-mihomo: true
--
   client-fingerprint: chrome
   flow: xtls-rprx-vision
-  name: 🇺🇸 US-17 · 138ms
-  network: raw
+  name: 🇺🇸 US-12 · 1007ms
+  network: "tcp%232%f0%9f%90%8a%40oneclickvpnkeysvless%3a%2f%2fd342d11e-d424-4583-b36e-524ab1f0afa4%40185.113.223.183%3a8443%3fed%3d2560"
   port: 443
   reality-opts:
     public-key: e2RLf57Li_-MDZGE9ss1BWPgP54mqRb5PfXhW2jcVVg
@@ -357,50 +298,419 @@ proxies:
   udp: true
   uuid: d65cc14c-f53f-4fe2-b262-97856601319c
 -
-  type: hysteria
-  name: 🇺🇸 US-18 · 1631ms
-  server: 137.175.82.41
-  port: 20022
-  password: dongtaiwang.com
+  name: 🇺🇸 US-13 · 985ms
+  server: 162.35.101.177
+  port: 443
+  type: vless
   tls: true
-  servername: bing.com
+  packet-encoding: xudp
+  uuid: cda0862a-0f87-4be9-8ed8-1d0c9e382839
+  servername: 0592efg.us8.h1clayd.click
+  network: grpc
+  grpc-opts:
+    grpc-mode: gun
+    grpc-service-name: 99f2107b03f8
+  reality-opts:
+    public-key: cO3wYHISTeorXcM8ffaDCDdqZ-olBQL-GyZqb-W7rTk
+    short-id: bd8f712209a9c283
+  client-fingerprint: random
+  skip-cert-verify: false
+  udp: true
+  tfo: false
+-
+  name: 🇺🇸 US-14 · 1560ms
+  server: 45.144.112.55
+  port: 443
+  type: vless
+  tls: true
+  packet-encoding: xudp
+  uuid: d65cc14c-f53f-4fe2-b262-97856601319c
+  servername: yahoo.com
+  host: yahoo.com
+  path: /
+  flow: xtls-rprx-vision
+  reality-opts:
+    public-key: e2RLf57Li_-MDZGE9ss1BWPgP54mqRb5PfXhW2jcVVg
+    short-id: c39cc7310a
+  client-fingerprint: random
+  skip-cert-verify: false
+  udp: true
+  tfo: false
+-
+  name: 🇺🇸 US-15 · 1588ms
+  server: 148.135.86.162
+  port: 10000
+  type: vless
+  tls: true
+  packet-encoding: xudp
+  uuid: 327b1113-049e-4256-8d72-8815643dbb65
+  servername: addons.mozilla.org
+  host: addons.mozilla.org
+  path: /
+  flow: xtls-rprx-vision
+  reality-opts:
+    public-key: DCbnS4mIPc1W2-wI0MGHhykwzf2nVuZvBadErSE6MxU
+    short-id: a1b2c3d4
+  client-fingerprint: random
+  skip-cert-verify: false
+  udp: true
+  tfo: false
+-
+  name: 🇺🇸 US-16 · 1583ms
+  type: hysteria
+  server: 137.175.82.42
+  port: 20022
+  auth-str: dongtaiwang.com
+  protocol: udp
+  up: 20
+  down: 20
   sni: bing.com
   skip-cert-verify: true
+  fast-open: false
   alpn:
     - h3
-  up: 11
-  down: 55
-  auth-str: dongtaiwang.com
 -
+  type: anytls
+  name: 🇺🇸 US-17 · 1403ms
+  server: sdf65h46wr.df6h451rh.xin
+  port: 443
+  password: 0324fbc29561
+  tls: true
+  servername: images.ctfassets.net
+  sni: images.ctfassets.net
+  skip-cert-verify: true
+-
+  name: 🇺🇸 US-18 · 1742ms
+  client-fingerprint: random
+  encryption: none
+  network: ws
+  port: 443
+  server: fr-free.fastestrelay.com
+  sub_tag: M003-260806
+  tls: true
+  type: vless
+  udp: true
+  uuid: 43BCAE0A-10A6-4003-8615-BD510F4215BA
+  ws-opts:
+    headers:
+      Host: fr-free.fastestrelay.com
+      User-Agent: "Mozilla/5.0 (Windows NT 6.3; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.67 Safari/537.36"
+    path: /700gvl-us-free
+  xudp: true
+  packet-encoding: xudp
+  servername: fr-free.fastestrelay.com
+-
+  type: vless
+  name: 🇺🇸 US-19 · 2570ms
+  server: 13.141.51.2
+  port: 443
+  uuid: cda0862a-0f87-4be9-8ed8-1d0c9e382839
+  udp: true
+  tls: true
+  servername: 04535dt.us8.h1clayd.click
+  sni: 04535dt.us8.h1clayd.click
+  skip-cert-verify: false
+  client-fingerprint: firefox
+  reality-opts:
+    public-key: UoS8qZ74hP_ECcncCz55lzvlcVss3R7VA0WYZE0YQCY
+    short-id: ba2a3dce62b99092
+-
+  name: 🇺🇸 US-20 · 1750ms
   type: hysteria
-  name: 🇺🇸 US-19 · 1415ms
   server: 38.6.222.131
   port: 11008
-  password: dongtaiwang.com
-  tls: true
-  servername: bing.com
+  auth-str: dongtaiwang.com
   sni: bing.com
   skip-cert-verify: true
   alpn:
     - h3
-  up: 11
-  down: 55
-  auth-str: dongtaiwang.com
+  protocol: udp
+  up: 11 Mbps
+  down: 55 Mbps
 -
+  name: 🇺🇸 US-21 · 1244ms
   type: hysteria
-  name: 🇺🇸 US-20 · 1451ms
   server: 38.6.222.132
   port: 11008
-  password: dongtaiwang.com
-  tls: true
-  servername: bing.com
+  auth-str: dongtaiwang.com
   sni: bing.com
   skip-cert-verify: true
   alpn:
     - h3
-  up: 11
-  down: 55
-  auth-str: dongtaiwang.com
+  protocol: udp
+  up: 11 Mbps
+  down: 55 Mbps
+-
+  name: 🇺🇸 US-22 · 174ms
+  server: 38.145.220.193
+  port: 443
+  type: vless
+  tls: true
+  packet-encoding: xudp
+  uuid: 07a4351f-f5c8-4739-b70a-f76c08c9c9a0
+  servername: www.cloudflare.com
+  host: www.cloudflare.com
+  path: /
+  flow: xtls-rprx-vision
+  reality-opts:
+    public-key: vVI2d7f6Kor_qq5G9dj9Mgl3uzN0aN9EVndPbP3y5GY
+    short-id: 446efed1ff571486
+  client-fingerprint: random
+  skip-cert-verify: false
+  udp: true
+  tfo: false
+-
+  name: 🇺🇸 US-23 · 257ms
+  type: vless
+  server: 159.89.87.21
+  port: 28190
+  uuid: 14c80e0e-f7ce-4991-94fc-99a1db4a9b1e
+  udp: true
+  flow: xtls-rprx-vision
+  tls: true
+  servername: aws.amazon.com
+  reality-opts:
+    public-key: ZJRnFU-1s1JOnO8E9uZ7b00l1fPEh63fGRbdBANFRno
+  client-fingerprint: chrome
+-
+  name: 🇺🇸 US-24 · 284ms
+  server: 185.95.231.156
+  port: 443
+  type: vless
+  tls: true
+  packet-encoding: xudp
+  uuid: 1f8cf47a-b66a-4916-979f-26edfcf44eea
+  servername: www.apple.com
+  host: www.apple.com
+  path: /
+  flow: xtls-rprx-vision
+  reality-opts:
+    public-key: 8eXftARun6KH38UZhuqIfPR1VF2DLS9RMBZEnF5k6To
+    short-id: a3a578ab
+  client-fingerprint: random
+  skip-cert-verify: false
+  udp: true
+  tfo: false
+-
+  client-fingerprint: random
+  flow: xtls-rprx-vision
+  name: 🇺🇸 US-25 · 364ms
+  network: tcp
+  port: 443
+  reality-opts:
+    public-key: e2RLf57Li_-MDZGE9ss1BWPgP54mqRb5PfXhW2jcVVg
+    short-id: c39cc7310a
+  server: 169.40.42.74
+  servername: yahoo.com
+  tls: true
+  type: vless
+  udp: true
+  uuid: d65cc14c-f53f-4fe2-b262-97856601319c
+-
+  client-fingerprint: chrome
+  flow: xtls-rprx-vision
+  name: 🇺🇸 US-26 · 390ms
+  network: tcp
+  port: 443
+  reality-opts:
+    public-key: e2RLf57Li_-MDZGE9ss1BWPgP54mqRb5PfXhW2jcVVg
+    short-id: c39cc7310a
+  server: 169.40.42.89
+  servername: yahoo.com
+  tls: true
+  type: vless
+  udp: true
+  uuid: d65cc14c-f53f-4fe2-b262-97856601319c
+-
+  client-fingerprint: chrome
+  flow: xtls-rprx-vision
+  name: 🇺🇸 US-27 · 381ms
+  network: tcp
+  port: 443
+  reality-opts:
+    public-key: e2RLf57Li_-MDZGE9ss1BWPgP54mqRb5PfXhW2jcVVg
+    short-id: c39cc7310a
+  server: 169.40.42.163
+  servername: yahoo.com
+  tls: true
+  type: vless
+  udp: true
+  uuid: d65cc14c-f53f-4fe2-b262-97856601319c
+-
+  client-fingerprint: chrome
+  flow: xtls-rprx-vision
+  name: 🇺🇸 US-28 · 406ms
+  network: tcp
+  port: 443
+  reality-opts:
+    public-key: e2RLf57Li_-MDZGE9ss1BWPgP54mqRb5PfXhW2jcVVg
+    short-id: c39cc7310a
+  server: 169.40.42.35
+  servername: yahoo.com
+  tls: true
+  type: vless
+  udp: true
+  uuid: d65cc14c-f53f-4fe2-b262-97856601319c
+-
+  name: 🇨🇦 CA-02 · 351ms
+  server: 66.163.113.9
+  port: 443
+  type: vless
+  tls: true
+  packet-encoding: xudp
+  uuid: 03fcc618-b93d-6796-6aed-8a38c975d581
+  servername: kuruish.org
+  host: kuruish.org
+  path: /
+  skip-cert-verify: false
+  udp: true
+  tfo: false
+-
+  client-fingerprint: ios
+  flow: xtls-rprx-vision
+  name: 🇺🇸 US-29 · 398ms
+  network: tcp
+  port: 443
+  reality-opts:
+    public-key: e2RLf57Li_-MDZGE9ss1BWPgP54mqRb5PfXhW2jcVVg
+    short-id: c39cc7310a
+  server: 169.40.42.202
+  servername: yahoo.com
+  tls: true
+  type: vless
+  udp: true
+  uuid: d65cc14c-f53f-4fe2-b262-97856601319c
+-
+  name: 🇺🇸 US-30 · 424ms
+  type: vless
+  server: 169.40.42.90
+  port: 443
+  uuid: d65cc14c-f53f-4fe2-b262-97856601319c
+  udp: true
+  flow: xtls-rprx-vision
+  tls: true
+  servername: yahoo.com
+  reality-opts:
+    public-key: e2RLf57Li_-MDZGE9ss1BWPgP54mqRb5PfXhW2jcVVg
+    short-id: c39cc7310a
+  client-fingerprint: ios
+-
+  client-fingerprint: chrome
+  flow: xtls-rprx-vision
+  name: 🇺🇸 US-31 · 417ms
+  network: tcp
+  port: 443
+  reality-opts:
+    public-key: e2RLf57Li_-MDZGE9ss1BWPgP54mqRb5PfXhW2jcVVg
+    short-id: c39cc7310a
+  server: 169.40.42.229
+  servername: yahoo.com
+  tls: true
+  type: vless
+  udp: true
+  uuid: d65cc14c-f53f-4fe2-b262-97856601319c
+-
+  name: 🇺🇸 US-32 · 424ms
+  server: 169.40.42.231
+  port: 443
+  type: vless
+  tls: true
+  packet-encoding: xudp
+  uuid: d65cc14c-f53f-4fe2-b262-97856601319c
+  servername: yahoo.com
+  host: yahoo.com
+  path: /
+  flow: xtls-rprx-vision
+  reality-opts:
+    public-key: e2RLf57Li_-MDZGE9ss1BWPgP54mqRb5PfXhW2jcVVg
+    short-id: c39cc7310a
+  client-fingerprint: random
+  skip-cert-verify: false
+  udp: true
+  tfo: false
+-
+  name: 🇹🇼 TW-06 · 645ms
+  password: H7mP2xY9kJ4nQ8wR5tF6vB3z
+  port: 443
+  server: 160.187.100.109
+  skip-cert-verify: true
+  sni: vpn-tw-002.fastervpn.world
+  type: hysteria2
+-
+  name: 🇹🇼 TW-07 · 651ms
+  password: H7mP2xY9kJ4nQ8wR5tF6vB3z
+  port: 443
+  server: vpn-tw-002.fastervpn.world
+  skip-cert-verify: true
+  sni: www.bing.com
+  type: hysteria2
+-
+  auth: "lvu_3390f238bef4e3058ac47c87473755cf_07cd5acf7265adf5c1210040ca46facf:np2.1.HJjJucZ0-OZZUq5Njkl48v1gYx7ol9rXjxYXZUxrQdM"
+  name: 🇺🇸 US-33 · 946ms
+  password: "lvu_3390f238bef4e3058ac47c87473755cf_07cd5acf7265adf5c1210040ca46facf:np2.1.HJjJucZ0-OZZUq5Njkl48v1gYx7ol9rXjxYXZUxrQdM"
+  port: 14443
+  server: 194.87.224.137
+  skip-cert-verify: true
+  sni: n37.neproxy.net
+  type: hysteria2
+-
+  name: 🇺🇸 US-34 · 1055ms
+  alpn:
+    - h2
+  client-fingerprint: firefox
+  network: xhttp
+  port: 443
+  server: 45.9.190.245
+  sub_tag: P002-260618
+  tls: true
+  type: vless
+  udp: true
+  uuid: a5b1d16b-719b-4bd6-9d7b-fe6d84607da9
+  xhttp-opts:
+    host: fortuna.masynbazar.ru
+    mode: auto
+    path: /
+  servername: fortuna.masynbazar.ru
+-
+  name: 🇺🇸 US-35 · 1133ms
+  type: wireguard
+  server: 8.6.112.100
+  port: 878
+  ip: 172.16.0.2/32
+  ipv6: "2606:4700:110:8af2:447b:a9b9:b420:ebff/128"
+  mtu: 1420
+  private-key: "eGpcqvonUvA7/m1lcaERbf2opGESbp375ieSliLc3WU="
+  public-key: "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
+  udp: true
+-
+  alpn:
+    - h2
+  client-fingerprint: chrome
+  name: 🇺🇸 US-36 · 1950ms
+  network: xhttp
+  port: 443
+  server: 3.219.184.102
+  servername: fortuna.masynbazar.ru
+  tls: true
+  type: vless
+  udp: true
+  uuid: a5b1d16b-719b-4bd6-9d7b-fe6d84607da9
+  xhttp-opts:
+    path: /
+-
+  name: 🇺🇸 US-37 · 2535ms
+  type: vless
+  server: xray-b8ct4r2f-sahdon-hosaindoost.cloady.io
+  port: 443
+  uuid: 1fd2e2d1-96f5-2056-19fd-b375b1a9d851
+  udp: true
+  tls: true
+  servername: xray-b8ct4r2f-sahdon-hosaindoost.cloady.io
+  network: ws
+  ws-opts:
+    path: /ffad70ffdfc3bcda
+    headers:
+      Host: xray-b8ct4r2f-sahdon-hosaindoost.cloady.io
 proxy-groups:
 -
   name: 🚀 节点选择
@@ -414,33 +724,52 @@ proxy-groups:
     - 🇺🇸 美国
     - 🔯 故障转移
     - 🎯 全球直连
-    - 🇺🇸 US-01 · 74ms
-    - 🇺🇸 US-02 · 120ms
-    - 🇺🇸 US-03 · 143ms
-    - 🇺🇸 US-04 · 160ms
-    - 🇺🇸 US-05 · 242ms
-    - 🇺🇸 US-06 · 290ms
-    - 🇺🇸 US-07 · 239ms
-    - 🇺🇸 US-08 · 550ms
-    - 🇺🇸 US-09 · 66ms
-    - 🇺🇸 US-10 · 602ms
-    - 🇺🇸 US-11 · 99ms
-    - 🇺🇸 US-12 · 87ms
-    - 🇨🇦 CA-01 · 153ms
-    - 🇨🇦 CA-02 · 202ms
-    - 🇨🇦 CA-03 · 331ms
-    - 🇹🇼 TW-01 · 739ms
-    - 🇺🇸 US-13 · 681ms
-    - 🇺🇸 US-14 · 1120ms
-    - 🇹🇼 TW-02 · 946ms ·住宅
-    - 🇹🇼 TW-03 · 1198ms ·住宅
-    - 🇺🇸 US-15 · 806ms
-    - 🇹🇼 TW-04 · 1165ms ·住宅
-    - 🇺🇸 US-16 · 1414ms
-    - 🇺🇸 US-17 · 138ms
-    - 🇺🇸 US-18 · 1631ms
-    - 🇺🇸 US-19 · 1415ms
-    - 🇺🇸 US-20 · 1451ms
+    - 🇺🇸 US-01 · 140ms
+    - 🇺🇸 US-02 · 137ms
+    - 🇺🇸 US-03 · 183ms
+    - 🇺🇸 US-04 · 187ms
+    - 🇺🇸 US-05 · 284ms
+    - 🇺🇸 US-06 · 375ms
+    - 🇺🇸 US-07 · 479ms
+    - 🇺🇸 US-08 · 435ms
+    - 🇨🇦 CA-01 · 386ms
+    - 🇹🇼 TW-01 · 646ms ·住宅
+    - 🇹🇼 TW-02 · 640ms
+    - 🇹🇼 TW-03 · 845ms ·住宅
+    - 🇺🇸 US-09 · 533ms
+    - 🇺🇸 US-10 · 1098ms
+    - 🇹🇼 TW-04 · 914ms ·住宅
+    - 🇺🇸 US-11 · 498ms
+    - 🇹🇼 TW-05 · 1005ms ·住宅
+    - 🇺🇸 US-12 · 1007ms
+    - 🇺🇸 US-13 · 985ms
+    - 🇺🇸 US-14 · 1560ms
+    - 🇺🇸 US-15 · 1588ms
+    - 🇺🇸 US-16 · 1583ms
+    - 🇺🇸 US-17 · 1403ms
+    - 🇺🇸 US-18 · 1742ms
+    - 🇺🇸 US-19 · 2570ms
+    - 🇺🇸 US-20 · 1750ms
+    - 🇺🇸 US-21 · 1244ms
+    - 🇺🇸 US-22 · 174ms
+    - 🇺🇸 US-23 · 257ms
+    - 🇺🇸 US-24 · 284ms
+    - 🇺🇸 US-25 · 364ms
+    - 🇺🇸 US-26 · 390ms
+    - 🇺🇸 US-27 · 381ms
+    - 🇺🇸 US-28 · 406ms
+    - 🇨🇦 CA-02 · 351ms
+    - 🇺🇸 US-29 · 398ms
+    - 🇺🇸 US-30 · 424ms
+    - 🇺🇸 US-31 · 417ms
+    - 🇺🇸 US-32 · 424ms
+    - 🇹🇼 TW-06 · 645ms
+    - 🇹🇼 TW-07 · 651ms
+    - 🇺🇸 US-33 · 946ms
+    - 🇺🇸 US-34 · 1055ms
+    - 🇺🇸 US-35 · 1133ms
+    - 🇺🇸 US-36 · 1950ms
+    - 🇺🇸 US-37 · 2535ms
 -
   name: ♻️ 自动选择
   type: url-test
@@ -449,59 +778,59 @@ proxy-groups:
   tolerance: 30
   lazy: false
   proxies:
-    - 🇺🇸 US-01 · 74ms
-    - 🇺🇸 US-02 · 120ms
-    - 🇺🇸 US-03 · 143ms
-    - 🇺🇸 US-04 · 160ms
-    - 🇺🇸 US-05 · 242ms
-    - 🇺🇸 US-06 · 290ms
-    - 🇺🇸 US-07 · 239ms
-    - 🇺🇸 US-08 · 550ms
-    - 🇺🇸 US-09 · 66ms
-    - 🇺🇸 US-10 · 602ms
-    - 🇺🇸 US-11 · 99ms
-    - 🇺🇸 US-12 · 87ms
-    - 🇨🇦 CA-01 · 153ms
-    - 🇨🇦 CA-02 · 202ms
-    - 🇨🇦 CA-03 · 331ms
-    - 🇹🇼 TW-01 · 739ms
-    - 🇺🇸 US-13 · 681ms
-    - 🇺🇸 US-14 · 1120ms
-    - 🇹🇼 TW-02 · 946ms ·住宅
-    - 🇹🇼 TW-03 · 1198ms ·住宅
-    - 🇺🇸 US-15 · 806ms
-    - 🇹🇼 TW-04 · 1165ms ·住宅
-    - 🇺🇸 US-16 · 1414ms
-    - 🇺🇸 US-17 · 138ms
-    - 🇺🇸 US-18 · 1631ms
-    - 🇺🇸 US-19 · 1415ms
-    - 🇺🇸 US-20 · 1451ms
+    - 🇺🇸 US-01 · 140ms
+    - 🇺🇸 US-02 · 137ms
+    - 🇺🇸 US-03 · 183ms
+    - 🇺🇸 US-04 · 187ms
+    - 🇺🇸 US-05 · 284ms
+    - 🇺🇸 US-06 · 375ms
+    - 🇺🇸 US-07 · 479ms
+    - 🇺🇸 US-08 · 435ms
+    - 🇨🇦 CA-01 · 386ms
+    - 🇹🇼 TW-01 · 646ms ·住宅
+    - 🇹🇼 TW-02 · 640ms
+    - 🇹🇼 TW-03 · 845ms ·住宅
+    - 🇺🇸 US-09 · 533ms
+    - 🇺🇸 US-10 · 1098ms
+    - 🇹🇼 TW-04 · 914ms ·住宅
+    - 🇺🇸 US-11 · 498ms
+    - 🇹🇼 TW-05 · 1005ms ·住宅
+    - 🇺🇸 US-12 · 1007ms
+    - 🇺🇸 US-13 · 985ms
+    - 🇺🇸 US-14 · 1560ms
+    - 🇺🇸 US-15 · 1588ms
+    - 🇺🇸 US-16 · 1583ms
+    - 🇺🇸 US-17 · 1403ms
+    - 🇺🇸 US-18 · 1742ms
+    - 🇺🇸 US-19 · 2570ms
+    - 🇺🇸 US-20 · 1750ms
+    - 🇺🇸 US-21 · 1244ms
 -
   name: 🔯 故障转移
   type: fallback
   url: "https://www.gstatic.com/generate_204"
   interval: 180
   proxies:
-    - 🇺🇸 US-01 · 74ms
-    - 🇺🇸 US-02 · 120ms
-    - 🇺🇸 US-03 · 143ms
-    - 🇺🇸 US-04 · 160ms
-    - 🇺🇸 US-05 · 242ms
-    - 🇺🇸 US-06 · 290ms
-    - 🇺🇸 US-07 · 239ms
-    - 🇺🇸 US-08 · 550ms
-    - 🇺🇸 US-09 · 66ms
-    - 🇺🇸 US-10 · 602ms
-    - 🇺🇸 US-11 · 99ms
-    - 🇺🇸 US-12 · 87ms
-    - 🇨🇦 CA-01 · 153ms
-    - 🇨🇦 CA-02 · 202ms
-    - 🇨🇦 CA-03 · 331ms
-    - 🇹🇼 TW-01 · 739ms
-    - 🇺🇸 US-13 · 681ms
-    - 🇺🇸 US-14 · 1120ms
-    - 🇹🇼 TW-02 · 946ms ·住宅
-    - 🇹🇼 TW-03 · 1198ms ·住宅
+    - 🇺🇸 US-01 · 140ms
+    - 🇺🇸 US-02 · 137ms
+    - 🇺🇸 US-03 · 183ms
+    - 🇺🇸 US-04 · 187ms
+    - 🇺🇸 US-05 · 284ms
+    - 🇺🇸 US-06 · 375ms
+    - 🇺🇸 US-07 · 479ms
+    - 🇺🇸 US-08 · 435ms
+    - 🇨🇦 CA-01 · 386ms
+    - 🇹🇼 TW-01 · 646ms ·住宅
+    - 🇹🇼 TW-02 · 640ms
+    - 🇹🇼 TW-03 · 845ms ·住宅
+    - 🇺🇸 US-09 · 533ms
+    - 🇺🇸 US-10 · 1098ms
+    - 🇹🇼 TW-04 · 914ms ·住宅
+    - 🇺🇸 US-11 · 498ms
+    - 🇹🇼 TW-05 · 1005ms ·住宅
+    - 🇺🇸 US-12 · 1007ms
+    - 🇺🇸 US-13 · 985ms
+    - 🇺🇸 US-14 · 1560ms
 -
   name: 🏠 住宅IP优选
   type: url-test
@@ -510,9 +839,10 @@ proxy-groups:
   tolerance: 30
   lazy: false
   proxies:
-    - 🇹🇼 TW-02 · 946ms ·住宅
-    - 🇹🇼 TW-03 · 1198ms ·住宅
-    - 🇹🇼 TW-04 · 1165ms ·住宅
+    - 🇹🇼 TW-01 · 646ms ·住宅
+    - 🇹🇼 TW-03 · 845ms ·住宅
+    - 🇹🇼 TW-04 · 914ms ·住宅
+    - 🇹🇼 TW-05 · 1005ms ·住宅
 -
   name: 🤖 Gemini优选
   type: url-test
@@ -521,33 +851,33 @@ proxy-groups:
   tolerance: 30
   lazy: false
   proxies:
-    - 🇹🇼 TW-03 · 1198ms ·住宅
-    - 🇹🇼 TW-02 · 946ms ·住宅
-    - 🇹🇼 TW-04 · 1165ms ·住宅
-    - 🇺🇸 US-09 · 66ms
-    - 🇺🇸 US-03 · 143ms
-    - 🇺🇸 US-11 · 99ms
-    - 🇺🇸 US-01 · 74ms
-    - 🇺🇸 US-02 · 120ms
-    - 🇺🇸 US-04 · 160ms
-    - 🇨🇦 CA-03 · 331ms
-    - 🇺🇸 US-12 · 87ms
-    - 🇺🇸 US-14 · 1120ms
-    - 🇨🇦 CA-01 · 153ms
-    - 🇨🇦 CA-02 · 202ms
-    - 🇺🇸 US-05 · 242ms
-    - 🇺🇸 US-08 · 550ms
-    - 🇺🇸 US-10 · 602ms
-    - 🇺🇸 US-07 · 239ms
-    - 🇺🇸 US-06 · 290ms
-    - 🇹🇼 TW-01 · 739ms
-    - 🇺🇸 US-13 · 681ms
-    - 🇺🇸 US-15 · 806ms
-    - 🇺🇸 US-18 · 1631ms
-    - 🇺🇸 US-16 · 1414ms
-    - 🇺🇸 US-17 · 138ms
-    - 🇺🇸 US-19 · 1415ms
-    - 🇺🇸 US-20 · 1451ms
+    - 🇹🇼 TW-03 · 845ms ·住宅
+    - 🇹🇼 TW-01 · 646ms ·住宅
+    - 🇹🇼 TW-04 · 914ms ·住宅
+    - 🇹🇼 TW-05 · 1005ms ·住宅
+    - 🇺🇸 US-04 · 187ms
+    - 🇺🇸 US-01 · 140ms
+    - 🇺🇸 US-10 · 1098ms
+    - 🇺🇸 US-02 · 137ms
+    - 🇺🇸 US-03 · 183ms
+    - 🇺🇸 US-05 · 284ms
+    - 🇺🇸 US-06 · 375ms
+    - 🇺🇸 US-14 · 1560ms
+    - 🇺🇸 US-07 · 479ms
+    - 🇹🇼 TW-02 · 640ms
+    - 🇺🇸 US-08 · 435ms
+    - 🇨🇦 CA-01 · 386ms
+    - 🇺🇸 US-15 · 1588ms
+    - 🇺🇸 US-09 · 533ms
+    - 🇺🇸 US-12 · 1007ms
+    - 🇺🇸 US-16 · 1583ms
+    - 🇺🇸 US-13 · 985ms
+    - 🇺🇸 US-11 · 498ms
+    - 🇺🇸 US-18 · 1742ms
+    - 🇺🇸 US-19 · 2570ms
+    - 🇺🇸 US-17 · 1403ms
+    - 🇺🇸 US-20 · 1750ms
+    - 🇺🇸 US-21 · 1244ms
 -
   name: 🇹🇼 台湾
   type: url-test
@@ -556,10 +886,13 @@ proxy-groups:
   tolerance: 30
   lazy: false
   proxies:
-    - 🇹🇼 TW-01 · 739ms
-    - 🇹🇼 TW-02 · 946ms ·住宅
-    - 🇹🇼 TW-03 · 1198ms ·住宅
-    - 🇹🇼 TW-04 · 1165ms ·住宅
+    - 🇹🇼 TW-01 · 646ms ·住宅
+    - 🇹🇼 TW-02 · 640ms
+    - 🇹🇼 TW-03 · 845ms ·住宅
+    - 🇹🇼 TW-04 · 914ms ·住宅
+    - 🇹🇼 TW-05 · 1005ms ·住宅
+    - 🇹🇼 TW-06 · 645ms
+    - 🇹🇼 TW-07 · 651ms
 -
   name: 🇨🇦 加拿大
   type: url-test
@@ -568,9 +901,8 @@ proxy-groups:
   tolerance: 30
   lazy: false
   proxies:
-    - 🇨🇦 CA-01 · 153ms
-    - 🇨🇦 CA-02 · 202ms
-    - 🇨🇦 CA-03 · 331ms
+    - 🇨🇦 CA-01 · 386ms
+    - 🇨🇦 CA-02 · 351ms
 -
   name: 🇺🇸 美国
   type: url-test
@@ -579,26 +911,43 @@ proxy-groups:
   tolerance: 30
   lazy: false
   proxies:
-    - 🇺🇸 US-01 · 74ms
-    - 🇺🇸 US-02 · 120ms
-    - 🇺🇸 US-03 · 143ms
-    - 🇺🇸 US-04 · 160ms
-    - 🇺🇸 US-05 · 242ms
-    - 🇺🇸 US-06 · 290ms
-    - 🇺🇸 US-07 · 239ms
-    - 🇺🇸 US-08 · 550ms
-    - 🇺🇸 US-09 · 66ms
-    - 🇺🇸 US-10 · 602ms
-    - 🇺🇸 US-11 · 99ms
-    - 🇺🇸 US-12 · 87ms
-    - 🇺🇸 US-13 · 681ms
-    - 🇺🇸 US-14 · 1120ms
-    - 🇺🇸 US-15 · 806ms
-    - 🇺🇸 US-16 · 1414ms
-    - 🇺🇸 US-17 · 138ms
-    - 🇺🇸 US-18 · 1631ms
-    - 🇺🇸 US-19 · 1415ms
-    - 🇺🇸 US-20 · 1451ms
+    - 🇺🇸 US-01 · 140ms
+    - 🇺🇸 US-02 · 137ms
+    - 🇺🇸 US-03 · 183ms
+    - 🇺🇸 US-04 · 187ms
+    - 🇺🇸 US-05 · 284ms
+    - 🇺🇸 US-06 · 375ms
+    - 🇺🇸 US-07 · 479ms
+    - 🇺🇸 US-08 · 435ms
+    - 🇺🇸 US-09 · 533ms
+    - 🇺🇸 US-10 · 1098ms
+    - 🇺🇸 US-11 · 498ms
+    - 🇺🇸 US-12 · 1007ms
+    - 🇺🇸 US-13 · 985ms
+    - 🇺🇸 US-14 · 1560ms
+    - 🇺🇸 US-15 · 1588ms
+    - 🇺🇸 US-16 · 1583ms
+    - 🇺🇸 US-17 · 1403ms
+    - 🇺🇸 US-18 · 1742ms
+    - 🇺🇸 US-19 · 2570ms
+    - 🇺🇸 US-20 · 1750ms
+    - 🇺🇸 US-21 · 1244ms
+    - 🇺🇸 US-22 · 174ms
+    - 🇺🇸 US-23 · 257ms
+    - 🇺🇸 US-24 · 284ms
+    - 🇺🇸 US-25 · 364ms
+    - 🇺🇸 US-26 · 390ms
+    - 🇺🇸 US-27 · 381ms
+    - 🇺🇸 US-28 · 406ms
+    - 🇺🇸 US-29 · 398ms
+    - 🇺🇸 US-30 · 424ms
+    - 🇺🇸 US-31 · 417ms
+    - 🇺🇸 US-32 · 424ms
+    - 🇺🇸 US-33 · 946ms
+    - 🇺🇸 US-34 · 1055ms
+    - 🇺🇸 US-35 · 1133ms
+    - 🇺🇸 US-36 · 1950ms
+    - 🇺🇸 US-37 · 2535ms
 -
   name: 🎯 全球直连
   type: select
