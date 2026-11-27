@@ -47,6 +47,7 @@ import time
 import urllib.parse
 import urllib.request
 import zipfile
+import zlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -65,19 +66,23 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) clash/mihomo"}
 #     shaoyouvip/free、mfuu/FreeProxies、ripaojiedian/freenode
 #     （ripaojiedian / shaoyouvip 的日韩港占比 42%~50%，是典型的“日韩港垃圾源”）
 SOURCES = [
-    # 12 个高产、对国内友好、含美/加/台优质节点的 GitHub 源
+    ("Au1rxx/free-vpn-subscriptions", "main", "output/by-country/clash-US.yaml"),
+    ("Au1rxx/free-vpn-subscriptions", "main", "output/by-country/clash-CA.yaml"),
+    ("Au1rxx/free-vpn-subscriptions", "main", "output/by-country/clash-TW.yaml"),
+    ("peasoft/NoMoreWalls", "master", "list.meta.yml"),
+    ("SHUNZI88/proxysub", "main", "clean_proxies_only.yaml"),
+    ("awesome-vpn/awesome-vpn", "master", "clash.yaml"),
+    ("snakem982/proxypool", "main", "source/clash-meta-2.yaml"),
     ("anaer/Sub", "main", "clash.yaml"),
     ("Barabama/FreeNodes", "main", "nodes/merged.yaml"),
-    ("Au1rxx/free-vpn-subscriptions", "main", "output/clash.yaml"),
     ("cysk003/freeSub", "main", "clash.yaml"),
     ("ts-sf/fly", "main", "clash"),
     ("ermaozi/get_subscribe", "main", "subscribe/clash.yml"),
     ("share-daily/node", "main", "clash.yaml"),
     ("yy1588133/proxy-pool", "main", "clash.yaml"),
-    ("snakem982/proxypool", "main", "source/clash-meta-2.yaml"),
     ("free18/v2ray", "main", "c.yaml"),
-    ("mahdibland/ShadowsocksAggregator", "master", "Eternity.yml"),
     ("chengaopan/AutoMergePublicNodes", "master", "list.yml"),
+    ("mahdibland/ShadowsocksAggregator", "master", "Eternity.yml"),
 ]
 
 # 非 GitHub 的每日源站：路径里的 {Y}/{M}/{D} 由 _daily_dates() 按北京日期填充。
@@ -220,12 +225,31 @@ def fetch_sources():
 # ---------------------------------------------------------------- 2. 清洗 / 去重
 BAD_SNI_SUFFIXES = (
     ".pages.dev", ".workers.dev", ".dpdns.org", ".eu.org", ".us.ci", ".frii.site",
-    ".de5.net", ".df6h451rh.xin", "xmfhlpy.com",
+    ".de5.net", "xmfhlpy.com",
     "connectingpeoplewithgreatjobs.com",
     "nextjobopportunityandclaimyouridealrole.com",
     "employersandbuildprofessionalnetwork.com",
     "searchnationwidecareerchangehelp.com",
 )
+
+
+def _has_tls(p):
+    """判断节点是否具备 TLS / Reality / 强加密混淆传输（明文 VMess/VLESS 国内存活率 0%）"""
+    ptype = str(p.get("type") or "").lower()
+    if ptype in ("trojan", "anytls", "hysteria", "hysteria2", "tuic", "wireguard"):
+        return True
+    if p.get("reality-opts") or p.get("tls") in (True, "true", "True", 1):
+        return True
+    if ptype == "ss":
+        return bool(p.get("plugin")) or str(p.get("cipher") or "").lower().startswith("2022-blake3")
+    return False
+
+
+def _is_ss_raw(p):
+    """判断是否为无插件、非 SS-2022 的裸 Shadowsocks（国内 AEAD 特征易被直接阻断）"""
+    return (str(p.get("type") or "").lower() == "ss"
+            and not p.get("plugin")
+            and not str(p.get("cipher") or "").lower().startswith("2022-blake3"))
 
 
 def _bad_host_str(s):
@@ -246,7 +270,9 @@ def normalize(proxies, src):
         if not isinstance(p, dict):
             continue
         ptype = str(p.get("type", "")).lower()
-        if ptype not in ALLOWED_TYPES:
+        if ptype not in ALLOWED_TYPES or ptype in ("ssr", "http", "socks5"):
+            continue
+        if ptype in ("vless", "vmess") and not _has_tls(p):
             continue
         srv = str(p.get("server", "")).strip()
         if not srv or srv.startswith(BAD_SERVER_PREFIX) or _bad_host_str(srv):
@@ -258,6 +284,8 @@ def normalize(proxies, src):
         if not 0 < port < 65536:
             continue
         if ptype == "ss" and str(p.get("cipher") or "").lower() == "rc4-md5":
+            continue
+        if _is_ss_raw(p) and (port == 19999 or "ZRpgaBeGxtENIXgvhpkZBKz9GnWRS2dYcx9O+a2iwN4=" in str(p.get("password") or "")):
             continue
         ws = p.get("ws-opts") if isinstance(p.get("ws-opts"), dict) else {}
         sni_vals = (p.get("servername"), p.get("sni"), (ws.get("headers") or {}).get("Host"))
@@ -572,8 +600,19 @@ def measure(exe, proxies, workdir, workers, rounds, timeout_ms, test_url):
 GOOGLE_URL = "https://www.google.com/generate_204"
 YOUTUBE_URL = "https://www.youtube.com/"
 GEMINI_URL = "https://gemini.google.com/"
+TRACE_URL = "https://www.cloudflare.com/cdn-cgi/trace"
 SPEED_URL = "https://ajax.googleapis.com/ajax/libs/threejs/r84/three.min.js"
 SPEED_BYTES = 200 * 1024
+PROBE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+ISO3_TO_ISO2 = {
+    "USA": "US", "CAN": "CA", "TWN": "TW", "HKG": "HK", "CHN": "CN", "MAC": "MO",
+    "JPN": "JP", "KOR": "KR", "SGP": "SG", "GBR": "GB", "DEU": "DE", "NLD": "NL",
+    "FRA": "FR", "ITA": "IT", "DNK": "DK", "RUS": "RU", "AUS": "AU", "IND": "IN",
+}
 
 
 def _median(vals):
@@ -602,6 +641,41 @@ def _verify_ports(n):
     return ports
 
 
+def trace_probe(port, timeout_ms=4000):
+    """通过代理端口真实探测出口国家与出口 IP（解决入口 TW/CA 但实际落地 HK/IT 的“送中/伪装”节点）"""
+    proxy = "http://127.0.0.1:%d" % port
+    op = urllib.request.build_opener(
+        urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    t_sec = max(1.5, timeout_ms / 1000.0)
+    try:
+        req = urllib.request.Request(TRACE_URL, headers=PROBE_HEADERS)
+        with op.open(req, timeout=t_sec) as resp:
+            txt = resp.read(8192).decode("utf-8", "ignore")
+        kv = {}
+        for ln in txt.splitlines():
+            k, _, v = ln.partition("=")
+            if k and v:
+                kv[k.strip().lower()] = v.strip()
+        loc = (kv.get("loc") or "").upper()
+        ip = kv.get("ip") or ""
+        if len(loc) == 2 and loc.isalpha() and loc not in ("XX", "T1"):
+            return loc, ip
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        req = urllib.request.Request("http://ip-api.com/json/?fields=status,countryCode,query",
+                                     headers=PROBE_HEADERS)
+        with op.open(req, timeout=t_sec) as resp:
+            j = json.loads(resp.read(8192).decode("utf-8", "ignore"))
+        cc = (j.get("countryCode") or "").upper()
+        ip = j.get("query") or ""
+        if len(cc) == 2 and cc.isalpha():
+            return cc, ip
+    except Exception:  # noqa: BLE001
+        pass
+    return "", ""
+
+
 def http_probe(port, site, timeout_ms):
     """通过 127.0.0.1:<port> 这个入站口发一次真实 HTTP 请求。
 
@@ -609,9 +683,8 @@ def http_probe(port, site, timeout_ms):
     所以那种测法证明不了“网页真能打开”。这里走真实请求 + 真实状态码 + 真实内容：
       google  —— 必须 204（generate_204 的标准返回）
       youtube —— 必须 200，且响应体里真含 youtube / ytimg 字样（挡掉劫持页、错误页）
-      gemini  —— 必须 200，且最终 URL 还在 gemini.google.com（地区封锁会被 302 跳走）
-                 且响应体里真含 gemini 字样
-    返回 (ok, status, 毫秒, 错误说明)
+      gemini  —— 必须 200，且最终域名仍为 gemini.google.com、未跳 /faq、且未命中地区封锁标记
+    返回 (ok, status, 毫秒, 错误/标签说明)
     """
     url = {"google": GOOGLE_URL, "youtube": YOUTUBE_URL, "gemini": GEMINI_URL}[site]
     proxy = "http://127.0.0.1:%d" % port
@@ -619,15 +692,17 @@ def http_probe(port, site, timeout_ms):
         urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
     t0 = time.time()
     try:
-        with op.open(url, timeout=max(1.0, timeout_ms / 1000.0)) as resp:
+        req = urllib.request.Request(url, headers=PROBE_HEADERS)
+        with op.open(req, timeout=max(1.5, timeout_ms / 1000.0)) as resp:
             code = resp.status
             ms = int((time.time() - t0) * 1000)
             if site == "google":
                 return code == 204, code, ms, ("" if code == 204 else "状态码 %d" % code)
-            body = resp.read(65536)
+            read_limit = 524288 if site == "gemini" else 65536
+            body = resp.read(read_limit)
             if "gzip" in (resp.headers.get("Content-Encoding") or "").lower():
-                try:                                  # 万一对方还是压了，先解开再找关键字
-                    body = gzip.GzipFile(fileobj=io.BytesIO(body)).read(65536)
+                try:
+                    body = zlib.decompressobj(16 + zlib.MAX_WBITS).decompress(body)
                 except Exception:  # noqa: BLE001
                     pass
             body_l = body.lower()
@@ -641,11 +716,37 @@ def http_probe(port, site, timeout_ms):
             if code != 200:
                 return False, code, ms, "状态码 %d" % code
             final = (resp.geturl() or "").lower()
-            if "gemini.google.com" not in final:
-                return False, code, ms, "被跳走: %s" % final[:70]
-            if len(body_l) < 2000 or b"gemini" not in body_l:
-                return False, code, ms, "返回内容不是 Gemini（%d 字节）" % len(body_l)
-            return True, code, ms, ""
+            parsed = urllib.parse.urlparse(final)
+            if parsed.netloc != "gemini.google.com":
+                return False, code, ms, "BLOCKED:redirect:%s" % parsed.netloc[:40]
+            if "/faq" in parsed.path or "/sorry" in parsed.path or "unsupported" in final:
+                return False, code, ms, "BLOCKED:path:%s" % parsed.path[:40]
+            m_reg = re.search(rb',2,1,200,"([A-Z]{3})"', body)
+            reg3 = m_reg.group(1).decode("ascii") if m_reg else ""
+            if b"45631641,null,false" in body or b"45617354,null,false" in body:
+                return False, code, ms, "BLOCKED:flag_false:%s" % reg3
+            for bad_kw in (
+                b"isn't currently supported",
+                b"not currently supported",
+                b"currently not supported",
+                b"unsupported_country",
+                b"gemini isn't available",
+                b"location is not supported",
+                "目前不支持你所在的地区".encode("utf-8"),
+                "不支援你所在的地區".encode("utf-8"),
+            ):
+                if bad_kw in body_l:
+                    return False, code, ms, "BLOCKED:text:%s" % reg3
+            if reg3 and reg3 not in ("USA", "CAN", "TWN"):
+                return False, code, ms, "BLOCKED:region:%s" % reg3
+            if len(body_l) < 5000 or b"gemini" not in body_l or not (
+                b"45631641,null,true" in body
+                or b"45617354,null,true" in body
+                or reg3 in ("USA", "CAN", "TWN")
+                or b"wiz_global_data" in body_l
+            ):
+                return False, code, ms, "返回内容异常（%d 字节）" % len(body_l)
+            return True, code, ms, "OK:%s" % (reg3 or "OK")
     except urllib.error.HTTPError as e:
         return False, e.code, int((time.time() - t0) * 1000), "HTTP %d" % e.code
     except Exception as e:  # noqa: BLE001
@@ -653,7 +754,7 @@ def http_probe(port, site, timeout_ms):
 
 
 def probe_one_node(port, rounds, timeout_ms, check_gemini=False):
-    """一个节点测谷歌+YouTube（可选再测 Gemini），顺序执行避免自己抢自己的带宽"""
+    """一个节点测谷歌+YouTube（可选再测 Gemini），双通后顺带测真实出口 IP/国家"""
     g, y, m, g_err, y_err, m_err = [], [], [], "", "", ""
     for _ in range(max(1, rounds)):
         ok, code, ms, err = http_probe(port, "google", timeout_ms)
@@ -674,7 +775,8 @@ def probe_one_node(port, rounds, timeout_ms, check_gemini=False):
                 m.append(ms)
             else:
                 m_err = err
-    return _median(g), len(g), g_err, _median(y), len(y), y_err, _median(m), len(m), m_err
+    exit_cc, exit_ip = trace_probe(port, min(timeout_ms, 4000)) if (g and y) else ("", "")
+    return _median(g), len(g), g_err, _median(y), len(y), y_err, _median(m), len(m), m_err, exit_cc, exit_ip
 
 
 def download_probe(port, timeout_ms=5000):
@@ -722,11 +824,11 @@ def probe_gemini_batch(exe, proxies, workdir, workers, timeout_ms):
             if ok:
                 continue
             with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
-                futs = {ex.submit(http_probe, port, "gemini", timeout_ms): p["__id"]
+                futs = {ex.submit(http_probe, port, "gemini", max(timeout_ms, 7000)): p["__id"]
                         for p, port in zip(chunk, ports)}
                 for f in as_completed(futs):
-                    ok_m, _c, ms, _e = f.result()
-                    out[futs[f]] = (ok_m, ms if ok_m else None)
+                    ok_m, _c, ms, err_tag = f.result()
+                    out[futs[f]] = (ok_m, ms if ok_m else None, err_tag)
         finally:
             proc.terminate()
             try:
@@ -925,22 +1027,22 @@ def verify_sites(exe, proxies, workdir, workers, rounds, timeout_ms, max_delay, 
 
     result = {}
     stat = {"full": 0, "slow": 0, "gonly": 0, "ngem": 0, "dead": 0, "youtube_only": 0}
-    for nid, (g, gh, ge, y, yh, ye, m, mh, me) in rows.items():
+    for nid, (g, gh, ge, y, yh, ye, m, mh, me, exit_cc, exit_ip) in rows.items():
         ok_g = g is not None and gh >= min_hits
         ok_y = y is not None and yh >= min_hits
         ok_m = (m is not None and mh >= min_hits) if check_gemini else True
         if ok_g and ok_y and ok_m:
             tier = "full" if g <= max_delay else "slow"
             result[nid] = {"delay": g, "hits": gh, "google": g, "youtube": y,
-                           "gemini": m, "tier": tier}
+                           "gemini": m, "tier": tier, "exit_cc": exit_cc, "exit_ip": exit_ip}
         elif ok_g and ok_y:
             tier = "ngem"
             result[nid] = {"delay": g, "hits": gh, "google": g, "youtube": y,
-                           "gemini": None, "tier": tier}
+                           "gemini": None, "tier": tier, "exit_cc": exit_cc, "exit_ip": exit_ip}
         elif ok_g:
             tier = "gonly"
             result[nid] = {"delay": g, "hits": gh, "google": g, "youtube": None,
-                           "gemini": None, "tier": tier}
+                           "gemini": None, "tier": tier, "exit_cc": exit_cc, "exit_ip": exit_ip}
         elif ok_y:
             # 谷歌不通、YouTube 通：说明节点里塞了分流/劫持，不可信，直接丢
             stat["youtube_only"] += 1
@@ -1288,8 +1390,18 @@ REGION_PRIORITY = {"HK": 0, "TW": 0, "JP": 0, "SG": 0, "KR": 0, "CA": 1, "US": 2
 RESI_CC = {"TW", "CA"}
 # 从美区机房到各大区入口的“物理下界”（ms）。实测值远低于下界×0.7，说明这个节点
 # 的入口根本不在它声称的地区（多半在美西中转），你连它反而要绕太平洋 —— 直接剔除。
-US_LOWER_BOUND = {"US": 15, "CA": 20, "JP": 110, "KR": 120, "HK": 145, "TW": 150,
+US_LOWER_BOUND = {"JP": 110, "KR": 120, "HK": 145, "TW": 150,
                   "SG": 165, "GB": 85, "DE": 90, "NL": 90, "FR": 95, "RU": 130}
+
+
+def _geo_of(p, geo):
+    """优先取通过代理实测出口 IP 解析到的归属地（key=__id），缺失时退回入口 server 归属地"""
+    if isinstance(p, dict):
+        pid = p.get("__id")
+        if pid and pid in geo:
+            return geo[pid]
+        return geo.get(str(p.get("server")), {})
+    return {}
 
 # ---- 住宅 IP 启发式判定 ----
 # 数据来源只有 ip-api 免费字段（isp / org / as / reverse rDNS），没有官方的 hosting 标记，
@@ -1430,7 +1542,8 @@ def load_previous(path, limit=60, exclude_types=None):
     if not isinstance(doc, dict) or not isinstance(doc.get("proxies"), list):
         log("  [warn] 上一版订阅里没有 proxies（忽略）")
         return []
-    scored = []
+    raw_list = []
+    meta_by_key = {}
     for p in doc["proxies"]:
         if not isinstance(p, dict):
             continue
@@ -1443,12 +1556,16 @@ def load_previous(path, limit=60, exclude_types=None):
         m = re.search(r"·\s*(\d+)ms", nm)
         ms = int(m.group(1)) if m else 9999
         tw_resi = 0 if ("·住宅" in nm and "TW" in nm) else 1
-        q = {k: v for k, v in p.items() if not str(k).startswith("__") and k != "name"}
+        meta_by_key[dedupe_key(p)] = (tw_resi, ms)
+        raw_list.append(p)
+    scored = []
+    for q in normalize(raw_list, "prev"):
+        tw_resi, ms = meta_by_key.get(dedupe_key(q), (1, 9999))
+        q.pop("name", None)
         q["__carry"] = 1
-        q["__src"] = "prev"
-        scored.append((tw_resi, ms, q))
-    scored.sort(key=lambda x: (x[0], x[1]))
-    return [x[2] for x in scored[:limit]]
+        scored.append((0 if not _is_ss_raw(q) else 1, tw_resi, china_proto_penalty(q), ms, q))
+    scored.sort(key=lambda x: (x[0], x[1], x[2], x[3]))
+    return [x[4] for x in scored[:limit]]
 
 
 def second_build(candidates, verified, geo, path, regions, resi_cc=None):
@@ -1461,7 +1578,7 @@ def second_build(candidates, verified, geo, path, regions, resi_cc=None):
         info = verified.get(p["__id"])
         if not info or not (info.get("google") and info.get("youtube")):
             continue
-        cc = geo.get(str(p.get("server")), {}).get("cc") or "??"
+        cc = _geo_of(p, geo).get("cc") or "??"
         if cc not in keep_cc:
             continue
         q = dict(p)
@@ -1504,17 +1621,27 @@ def _is_cdn_server(srv):
 
 
 def china_proto_penalty(p):
-    """按国内实测存活率打分（附加延迟惩罚 ms）：AEAD SS / VLESS+Reality / Hysteria2 最稳排最前。"""
+    """按国内实测存活率打分（附加延迟惩罚 ms）：抗 DPI 协议（AnyTLS/Hysteria2/TUIC/Reality/xhttp/ss+plugin）排最前，裸 SS 重罚。"""
     t = str(p.get("type") or "").lower()
-    if t in ("ss", "hysteria2", "tuic", "wireguard"):
+    net = str(p.get("network") or "tcp").lower()
+    if t in ("anytls", "hysteria2", "tuic"):
         return 0
     if t == "vless" and p.get("reality-opts"):
         return 0
-    if t in ("vless", "vmess"):
-        return 60
-    if t in ("trojan", "anytls", "ssr", "hysteria"):
-        return 150
-    return 180
+    if t == "ss":
+        if p.get("plugin") or str(p.get("cipher") or "").lower().startswith("2022-blake3"):
+            return 0
+        return 600
+    if t == "vless" and _has_tls(p):
+        return 0 if net in ("xhttp", "splithttp", "grpc", "ws", "h2", "httpupgrade") else 40
+    if t == "wireguard":
+        return 40
+    if t == "trojan":
+        sni = str(p.get("sni") or p.get("servername") or "")
+        return 120 if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", sni) else 40
+    if t == "vmess" and _has_tls(p):
+        return 40 if net in ("ws", "grpc", "h2", "httpupgrade", "xhttp") else 120
+    return 160
 
 
 def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, write_txt=True,
@@ -1526,7 +1653,7 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
     for p in nodes:
         nid = p["__id"]
         d = nodes_delay[nid]
-        g = geo.get(str(p.get("server")), {})
+        g = _geo_of(p, geo)
         cc_g = (g.get("cc") or "").upper()
         # 只认 TW/CA 的住宅 IP：免费源里的“别国家宽”对用户没用，不计入住宅组
         is_resi = classify_resi(g) is True and (not resi_cc or cc_g in resi_cc)
@@ -1538,8 +1665,8 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
         resi_bonus = 150 if (is_resi and cc_g == "TW") else 0
         # 综合质量分（越低越好）：延迟 + Gemini 延迟权重 + 抖动惩罚 + 协议惩罚 - 台湾住宅/带宽加分
         qscore = max(1, int(d["delay"]) + (gemini_ms // 3 if gemini_ms else 0)
-                     + min(200, jitter_ms // 2) + proto_pen - resi_bonus - min(80, speed_kbps // 25))
-        gem_rank = 0 if (is_resi and cc_g == "TW") else (0 if d.get("gemini") else 1)
+                     + min(120, jitter_ms // 5) + proto_pen - resi_bonus - min(80, speed_kbps // 25))
+        gem_rank = 0 if d.get("gemini") else 1
         items.append({"node": p, "cc": g.get("cc", ""), "delay": d["delay"], "hits": d["hits"],
                       "tier": p.get("__tier", "full"),
                       "carry": bool(p.get("__carry")),
@@ -1593,9 +1720,13 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
     # 每地区只留最快的 N 个（region_cap 按地区覆盖，resi_cap 额外保底台湾/加拿大住宅 IP）
     region_cap = region_cap or {}
     if max_per_region > 0 or region_cap:
-        kept, quota, resi_kept = [], {}, 0
+        kept, quota, ss_raw_cnt, resi_kept = [], {}, {}, 0
         for it in items:
             cc = it["cc"] if it["cc"] in ISO2 else "XX"
+            if _is_ss_raw(it["node"]):
+                if ss_raw_cnt.get(cc, 0) >= 3:
+                    continue
+                ss_raw_cnt[cc] = ss_raw_cnt.get(cc, 0) + 1
             lim = region_cap.get(cc, max_per_region)
             quota[cc] = quota.get(cc, 0) + 1
             if quota[cc] <= lim:
@@ -1634,8 +1765,9 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
         proxies.append(p)
 
     primary_items = [it for it in items if it["tier"] == "full"]
-    # 自动选择/故障转移按综合质量分升序，不被跨洋 1000ms 节点占住头部
-    fast_sorted = sorted(primary_items or items, key=lambda x: (x["qscore"], 0 if x["carry"] else 1))
+    gem_primary = [it for it in primary_items if it.get("gemini")]
+    # 自动选择/故障转移优先选实测 Gemini 可用且综合质量分最优的节点
+    fast_sorted = sorted(gem_primary or primary_items or items, key=lambda x: (x["qscore"], 0 if x["carry"] else 1))
     main_pool = [it["name"] for it in fast_sorted]
     resi_names = [it["name"] for it in items if it.get("resi")]
     gemini_names = [it["name"] for it in sorted(items, key=lambda x: (x["resi_rank"], x["gemini_ms"] or x["qscore"], x["qscore"]))
@@ -1752,11 +1884,20 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
             lines.append("-")
             yaml_emit(lines, g, 1)
 
+        gemini_rules = [
+            "DOMAIN-SUFFIX,gemini.google.com,🤖 Gemini优选",
+            "DOMAIN-SUFFIX,bard.google.com,🤖 Gemini优选",
+            "DOMAIN-SUFFIX,aistudio.google.com,🤖 Gemini优选",
+            "DOMAIN-SUFFIX,makersuite.google.com,🤖 Gemini优选",
+            "DOMAIN-SUFFIX,generativelanguage.googleapis.com,🤖 Gemini优选",
+            "DOMAIN-SUFFIX,notebooklm.google.com,🤖 Gemini优选",
+        ] if gemini_names else []
         rules = ["IP-CIDR,127.0.0.0/8,DIRECT,no-resolve", "IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",
                  "IP-CIDR,172.16.0.0/12,DIRECT,no-resolve", "IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
                  "IP-CIDR,100.64.0.0/10,DIRECT,no-resolve", "IP-CIDR,169.254.0.0/16,DIRECT,no-resolve",
                  "IP-CIDR6,fc00::/7,DIRECT,no-resolve", "IP-CIDR6,fe80::/10,DIRECT,no-resolve",
                  "DOMAIN-SUFFIX,local,DIRECT", "DOMAIN-SUFFIX,lan,DIRECT", "DOMAIN-SUFFIX,home.arpa,DIRECT",
+                 *gemini_rules,
                  "GEOSITE,private,DIRECT", "GEOSITE,cn,DIRECT", "GEOIP,CN,DIRECT", "MATCH,🚀 节点选择"]
         lines.append("rules:")
         for r in rules:
@@ -1912,12 +2053,12 @@ def main():
     ap.add_argument("--cn-check", dest="cn_check", action="store_true",
                     help="启用 globalping 上海探针实测（**默认关闭**：实测它与真实体验相关性差，"
                          "改用下面的并发压测 + 地区/协议筛选）")
-    ap.add_argument("--burst", type=int, default=6,
-                    help="并发压测：每个节点同时开几条连接（0=关闭），默认 6")
-    ap.add_argument("--burst-min-ok", type=float, default=0.8,
-                    help="并发压测要求的最小成功率（0~1），默认 0.8")
-    ap.add_argument("--burst-jitter", type=int, default=150,
-                    help="并发压测允许的最大抖动（最慢-最快，毫秒），默认 150")
+    ap.add_argument("--burst", type=int, default=4,
+                    help="并发压测：每个节点同时开几条连接（0=关闭），默认 4")
+    ap.add_argument("--burst-min-ok", type=float, default=0.75,
+                    help="并发压测要求的最小成功率（0~1），默认 0.75")
+    ap.add_argument("--burst-jitter", type=int, default=800,
+                    help="并发压测允许的最大抖动（最慢-最快，毫秒），默认 800")
     ap.add_argument("--cn-city", default="Shanghai",
                     help="国内探针城市，默认 Shanghai（globalping 的国内探针城市）")
     ap.add_argument("--cn-max-delay", type=int, default=120,
@@ -2095,13 +2236,21 @@ def main():
     geo = None
     want_regions = {c.strip().upper() for c in args.regions.split(",") if c.strip()}
     if want_regions:
-        log("[5.5/9] 提前查询归属地并只保留 %s" % "/".join(sorted(want_regions)))
+        log("[5.5/9] 提前查询入口归属地并粗筛 %s（保留 CDN/Anycast/WireGuard/AnyTLS 待实测出口）"
+            % "/".join(sorted(want_regions)))
         t_geo = time.time()
         geo = geolocate([str(p.get("server")) for p in candidates])
         before_n = len(candidates)
-        candidates = [p for p in candidates
-                      if (geo.get(str(p.get("server")), {}).get("cc") or "").upper() in want_regions]
-        log("  地区预筛（%s）: %d → %d（剔除 %d 个非目标地区节点，用时 %.1fs）"
+        kept_pre = []
+        for p in candidates:
+            srv_s = str(p.get("server"))
+            entry_cc = (geo.get(srv_s, {}).get("cc") or "").upper()
+            ptype_s = str(p.get("type") or "").lower()
+            if (entry_cc in want_regions or entry_cc == ""
+                    or _is_cdn_server(srv_s) or ptype_s in ("wireguard", "anytls")):
+                kept_pre.append(p)
+        candidates = kept_pre
+        log("  地区预筛（%s）: %d → %d（剔除 %d 个非目标地区直连节点，用时 %.1fs）"
             % ("/".join(sorted(want_regions)), before_n, len(candidates), before_n - len(candidates),
                time.time() - t_geo))
         if len(candidates) < args.min_nodes:
@@ -2127,13 +2276,45 @@ def main():
         return 1
 
     if geo is None:
-        log("[7/9] 查询归属地（先查，因为亚太门槛和探针挑样都要看国家）")
+        geo = {}
+    need_geo = {str(p.get("server")) for p in candidates if str(p.get("server")) not in geo}
+    for vinfo in verified.values():
+        eip = vinfo.get("exit_ip") or ""
+        if eip and eip not in geo:
+            need_geo.add(eip)
+    if need_geo:
+        log("[7/9] 解析节点真实出口 IP 归属地（新增 %d 个 IP/域名）" % len(need_geo))
         t_geo = time.time()
-        geo = geolocate([str(p.get("server")) for p in candidates])
-        log("  已知归属: %d / %d（用时 %.1fs）" % (sum(1 for v in geo.values() if v["cc"]), len(geo),
-                                            time.time() - t_geo))
+        geo.update(geolocate(list(need_geo)))
+        log("  出口归属地解析完成（用时 %.1fs）" % (time.time() - t_geo))
     else:
-        log("[7/9] 归属地已在第 5.5 步查询完毕，跳过重复查询")
+        log("[7/9] 归属地已就绪")
+
+    for p in candidates:
+        pid = p["__id"]
+        vinfo = verified.get(pid, {})
+        eip = vinfo.get("exit_ip") or ""
+        ecc = (vinfo.get("exit_cc") or "").upper()
+        base_g = dict(geo.get(eip) if (eip and eip in geo) else geo.get(str(p.get("server")), {}))
+        if ecc in ISO2:
+            base_g["cc"] = ecc
+            if eip:
+                base_g["ip"] = eip
+        geo[pid] = base_g
+
+    if want_regions:
+        before_exit = len(candidates)
+        kept_exit = []
+        for p in candidates:
+            cc_real = (_geo_of(p, geo).get("cc") or "").upper()
+            if cc_real in want_regions:
+                kept_exit.append(p)
+            else:
+                verified.pop(p["__id"], None)
+        candidates = kept_exit
+        if before_exit != len(candidates):
+            log("  真实出口地区筛选（%s）: %d → %d（剔除 %d 个“送中/港/欧”伪装出口节点）"
+                % ("/".join(sorted(want_regions)), before_exit, len(candidates), before_exit - len(candidates)))
 
     # ---- 第二份“宽口径”订阅（可选）：只做双站验证 + 地区筛选，不限协议、不压测 ----
     if args.second_out:
@@ -2163,7 +2344,7 @@ def main():
             info = verified.get(p["__id"])
             if not info or info["tier"] != "slow" or info["delay"] > args.max_delay_asia:
                 continue
-            if geo.get(str(p.get("server")), {}).get("cc", "") in ASIA:
+            if _geo_of(p, geo).get("cc", "") in ASIA:
                 info["tier"] = "full"
                 promoted += 1
         log("  亚太放宽（≤%dms）: 收回 %d 个港澳台日韩新节点" % (args.max_delay_asia, promoted))
@@ -2175,7 +2356,9 @@ def main():
         info = verified.get(p["__id"])
         if not info:
             continue
-        cc = geo.get(str(p.get("server")), {}).get("cc") or "??"
+        cc = _geo_of(p, geo).get("cc") or "??"
+        if info.get("exit_cc") == cc:
+            continue
         lb = US_LOWER_BOUND.get(cc)
         if lb and info.get("google") and info["google"] < lb * 0.7:
             suspects.append((p, info.get("google"), cc))
@@ -2202,14 +2385,14 @@ def main():
         else:
             keep = ASIA_STRICT | {"MO", "??"}
         probe_pool = [p for p in candidates
-                      if (geo.get(str(p.get("server")), {}).get("cc") or "??") in keep]
+                      if (_geo_of(p, geo).get("cc") or "??") in keep]
         # 优先级：亚太 0 > 加拿大 1 > 美国 2 > 其他 3（稳定排序，组内保持原顺序）
         probe_pool.sort(key=lambda p: REGION_PRIORITY.get(
-            geo.get(str(p.get("server")), {}).get("cc") or "??", 3))
+            _geo_of(p, geo).get("cc") or "??", 3))
         skipped = len(candidates) - len(probe_pool)
         mix = {}
         for p in probe_pool:
-            cc = geo.get(str(p.get("server")), {}).get("cc") or "??"
+            cc = _geo_of(p, geo).get("cc") or "??"
             mix[cc] = mix.get(cc, 0) + 1
         top = ",".join("%s:%d" % (k, v) for k, v in sorted(mix.items(),
                                                            key=lambda kv: -kv[1])[:8])
@@ -2225,8 +2408,8 @@ def main():
     # ---- 并发压测 + 真实带宽测速：砍掉“单连正常、并发就废”及“限速卡死”的节点 ----
     tw_resi_ids = {
         p["__id"] for p in candidates
-        if (geo.get(str(p.get("server")), {}).get("cc") or "").upper() == "TW"
-        and classify_resi(geo.get(str(p.get("server")), {})) is True
+        if (_geo_of(p, geo).get("cc") or "").upper() == "TW"
+        and classify_resi(_geo_of(p, geo)) is True
     }
     if tw_resi_ids:
         log("  [保护] 识别到 %d 个台湾住宅 IP 候选，并发/跨洋速率门槛已自动放宽" % len(tw_resi_ids))
@@ -2366,7 +2549,7 @@ def main():
             info = verified.get(p["__id"])
             if not info or info["tier"] != "full":
                 continue
-            cc = (geo.get(str(p.get("server")), {}).get("cc") or "").upper()
+            cc = (_geo_of(p, geo).get("cc") or "").upper()
             if cc in ("US", "CA") and args.na_max_delay > 0 and info["delay"] > args.na_max_delay:
                 info["tier"] = "slow"
                 reg_demoted += 1
@@ -2420,7 +2603,7 @@ def main():
         if info["tier"] == "gonly" and not args.keep_gonly:
             continue
         if info["tier"] == "ngem" and not args.keep_ngem:
-            g = geo.get(str(p.get("server")), {})
+            g = _geo_of(p, geo)
             is_resi = classify_resi(g) is True and \
                 (not resi_cc or (g.get("cc") or "").upper() in resi_cc)
             if not (args.resi_ngem_exempt and is_resi):
@@ -2469,17 +2652,56 @@ def main():
                  % (len(alive), args.max_delay, args.min_nodes))
         return 1
 
-    # 仅对最终达标的节点做一次快速 Gemini 检测，用于构建「🤖 Gemini优选」组，不再误杀其他节点
+    # 仅对最终达标的节点做一次快速 Gemini 检测，剔除被 Gemini 明确地区封锁（HK/CN/faq）的节点
     if not args.require_gemini and alive:
         gem = probe_gemini_batch(exe, alive, work, min(args.workers, 64), args.verify_timeout)
         gem_ok = 0
-        for pid, (ok_m, m_ms) in gem.items():
-            if pid in nodes_delay:
-                nodes_delay[pid]["gemini"] = bool(ok_m)
-                nodes_delay[pid]["gemini_ms"] = int(m_ms or 0)
-                if ok_m:
-                    gem_ok += 1
-        log("  Gemini 专项探测: %d / %d 个可用（已归入「🤖 Gemini优选」组）" % (gem_ok, len(alive)))
+        blocked_ids = set()
+        gem_by_cc = {}
+        for p in alive:
+            pid = p["__id"]
+            ok_m, m_ms, m_tag = gem.get(pid, (False, None, ""))
+            if pid not in nodes_delay:
+                continue
+            nodes_delay[pid]["gemini"] = bool(ok_m)
+            nodes_delay[pid]["gemini_ms"] = int(m_ms or 0)
+            if ok_m:
+                gem_ok += 1
+                if str(m_tag).startswith("OK:"):
+                    reg3 = str(m_tag).split(":", 1)[1]
+                    if reg3 in ISO3_TO_ISO2 and pid in geo:
+                        geo[pid]["cc"] = ISO3_TO_ISO2[reg3]
+                cc_g = (_geo_of(p, geo).get("cc") or "").upper()
+                gem_by_cc[cc_g] = gem_by_cc.get(cc_g, 0) + 1
+            elif str(m_tag).startswith("BLOCKED:"):
+                blocked_ids.add(pid)
+        log("  Gemini 专项探测: %d / %d 个可用（明确地区封锁 %d 个，已归入「🤖 Gemini优选」组）"
+            % (gem_ok, len(alive), len(blocked_ids)))
+        if blocked_ids and len(alive) - len(blocked_ids) >= args.min_nodes:
+            for pid in blocked_ids:
+                nodes_delay.pop(pid, None)
+            alive = [p for p in alive if p["__id"] not in blocked_ids]
+            log("  Gemini 地区封锁清理: 剔除 %d 个“送中/不支持地区”节点，剩余 %d 个"
+                % (len(blocked_ids), len(alive)))
+        # 若某地区已有 >=5 个 Gemini 可用节点，也顺带清理未通过 Gemini 的超时节点；不足 5 个的地区仅降为 ngem
+        kept_after_gem = []
+        dropped_non_gem = 0
+        for p in alive:
+            pid = p["__id"]
+            if nodes_delay[pid]["gemini"]:
+                kept_after_gem.append(p)
+                continue
+            cc_g = (_geo_of(p, geo).get("cc") or "").upper()
+            if gem_by_cc.get(cc_g, 0) >= 5 and len(alive) - dropped_non_gem > args.min_nodes:
+                nodes_delay.pop(pid, None)
+                dropped_non_gem += 1
+            else:
+                p["__tier"] = "ngem"
+                kept_after_gem.append(p)
+        if dropped_non_gem:
+            alive = kept_after_gem
+            log("  Gemini 质量精简: 在充足地区额外淘汰 %d 个 Gemini 不通节点，剩余 %d 个"
+                % (dropped_non_gem, len(alive)))
 
     log("[9/9] 生成配置并校验")
     sh_nodes = load_selfhost(args.selfhost)
