@@ -65,7 +65,7 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) clash/mihomo"}
 #     shaoyouvip/free、mfuu/FreeProxies、ripaojiedian/freenode
 #     （ripaojiedian / shaoyouvip 的日韩港占比 42%~50%，是典型的“日韩港垃圾源”）
 SOURCES = [
-    # 精简后的 8 个高产、对国内友好、含美/加/台优质节点的 GitHub 源
+    # 12 个高产、对国内友好、含美/加/台优质节点的 GitHub 源
     ("anaer/Sub", "main", "clash.yaml"),
     ("Barabama/FreeNodes", "main", "nodes/merged.yaml"),
     ("Au1rxx/free-vpn-subscriptions", "main", "output/clash.yaml"),
@@ -74,6 +74,10 @@ SOURCES = [
     ("ermaozi/get_subscribe", "main", "subscribe/clash.yml"),
     ("share-daily/node", "main", "clash.yaml"),
     ("yy1588133/proxy-pool", "main", "clash.yaml"),
+    ("snakem982/proxypool", "main", "source/clash-meta-2.yaml"),
+    ("free18/v2ray", "main", "c.yaml"),
+    ("mahdibland/ShadowsocksAggregator", "master", "Eternity.yml"),
+    ("chengaopan/AutoMergePublicNodes", "master", "list.yml"),
 ]
 
 # 非 GitHub 的每日源站：路径里的 {Y}/{M}/{D} 由 _daily_dates() 按北京日期填充。
@@ -214,21 +218,53 @@ def fetch_sources():
 
 
 # ---------------------------------------------------------------- 2. 清洗 / 去重
+BAD_SNI_SUFFIXES = (
+    ".pages.dev", ".workers.dev", ".dpdns.org", ".eu.org", ".us.ci", ".frii.site",
+    ".de5.net", ".df6h451rh.xin", "xmfhlpy.com",
+    "connectingpeoplewithgreatjobs.com",
+    "nextjobopportunityandclaimyouridealrole.com",
+    "employersandbuildprofessionalnetwork.com",
+    "searchnationwidecareerchangehelp.com",
+)
+
+
+def _bad_host_str(s):
+    if not s:
+        return False
+    s = str(s).strip()
+    if any(c in s for c in ("#", "@", "/", "?", "&", " ", "\t", "\r", "\n")):
+        return True
+    if any(len(lbl) > 63 for lbl in s.split(".")):
+        return True
+    sl = s.lower()
+    return any(sl == d.lstrip(".") or sl.endswith(d) for d in BAD_SNI_SUFFIXES)
+
+
 def normalize(proxies, src):
     kept = []
     for p in proxies:
         if not isinstance(p, dict):
             continue
-        if str(p.get("type", "")).lower() not in ALLOWED_TYPES:
+        ptype = str(p.get("type", "")).lower()
+        if ptype not in ALLOWED_TYPES:
             continue
         srv = str(p.get("server", "")).strip()
-        if not srv or srv.startswith(BAD_SERVER_PREFIX):
+        if not srv or srv.startswith(BAD_SERVER_PREFIX) or _bad_host_str(srv):
             continue
         try:
             port = int(p.get("port", 0))
         except (TypeError, ValueError):
             continue
         if not 0 < port < 65536:
+            continue
+        if ptype == "ss" and str(p.get("cipher") or "").lower() == "rc4-md5":
+            continue
+        ws = p.get("ws-opts") if isinstance(p.get("ws-opts"), dict) else {}
+        sni_vals = (p.get("servername"), p.get("sni"), (ws.get("headers") or {}).get("Host"))
+        if any(_bad_host_str(v) for v in sni_vals if v):
+            continue
+        if ptype in ("vless", "trojan", "vmess") and port != 443 and (
+                _is_cdn_server(srv) or "saas.sin.fan" in srv.lower()):
             continue
         if BAD_NAME.search(str(p.get("name", ""))):
             continue
@@ -1468,18 +1504,16 @@ def _is_cdn_server(srv):
 
 
 def china_proto_penalty(p):
-    """对国内友好度打分（返回附加延迟惩罚 ms）：TCP TLS 优先，UDP/QUIC 次之，裸 SS/明文 TCP 降权。"""
+    """按国内实测存活率打分（附加延迟惩罚 ms）：AEAD SS / VLESS+Reality / Hysteria2 最稳排最前。"""
     t = str(p.get("type") or "").lower()
-    if t in ("vless", "trojan", "anytls", "snell", "ssh", "mieru"):
+    if t in ("ss", "hysteria2", "tuic", "wireguard"):
         return 0
-    if t in ("hysteria2", "hysteria", "tuic", "wireguard"):
+    if t == "vless" and p.get("reality-opts"):
+        return 0
+    if t in ("vless", "vmess"):
         return 60
-    if t == "http" and p.get("tls"):
-        return 120
-    if t == "vmess":
-        net = str(p.get("network") or "tcp").lower()
-        if p.get("tls") or net in ("ws", "grpc", "h2", "httpupgrade", "xhttp"):
-            return 0
+    if t in ("trojan", "anytls", "ssr", "hysteria"):
+        return 150
     return 180
 
 
