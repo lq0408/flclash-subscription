@@ -65,7 +65,9 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) clash/mihomo"}
 #     shaoyouvip/free、mfuu/FreeProxies、ripaojiedian/freenode
 #     （ripaojiedian / shaoyouvip 的日韩港占比 42%~50%，是典型的“日韩港垃圾源”）
 SOURCES = [
-    # 14 个经留一法实测的高产 Cloudflare / 台湾住宅源（已剔除 15 个低 CF 贡献或完全重复的冗余源）
+    # 16 个经实测的高产 Cloudflare / 台湾住宅源（含 alireza786786 纯 Cloudflare 2000+ 节点池）
+    ("alireza786786/V2RAY-BREACHING-THE-BARRIERS", "main", "sub/clash/split/datacenters/cloudflare_unlimited.yaml"),
+    ("alireza786786/V2RAY-BREACHING-THE-BARRIERS", "main", "sub/clash/split/ws_unlimited.yaml"),
     ("Barabama/FreeNodes", "main", "nodes/merged.yaml"),
     ("anaer/Sub", "main", "clash.yaml"),
     ("looomix/Node-Configs", "main", "configs/clash/proxies.yaml"),

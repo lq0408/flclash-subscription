@@ -72,7 +72,7 @@ jobs:
             --cn-region all --max-delay 3000 \
             --max-per-region 120 \
             --region-cap "US=120,CA=120,TW=80" \
-            --cf-cap 150 --max-cf-total 240 --non-cf-cap 15 \
+            --cf-cap 400 --max-cf-total 500 --non-cf-cap 10 \
             --resi-cap 5 --max-resi-total 40 --resi-cc "TW,CA" \
             --burst 6 --burst-min-ok 0.8 --burst-jitter 300 \
             --min-nodes 3 \
