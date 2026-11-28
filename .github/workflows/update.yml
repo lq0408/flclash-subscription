@@ -69,8 +69,9 @@ jobs:
             --regions "US,CA,TW" \
             --cn-types "" --exclude-types "http-plain,socks5" \
             --cn-region all --max-delay 3000 \
-            --max-per-region 50 \
-            --region-cap "US=50,CA=50,TW=50" \
+            --max-per-region 60 \
+            --region-cap "US=60,CA=60,TW=60" \
+            --cf-cap 20 --max-cf-total 60 \
             --resi-cap 5 --max-resi-total 40 --resi-cc "TW,CA" \
             --burst 6 --burst-min-ok 0.8 --burst-jitter 300 \
             --min-nodes 3 \

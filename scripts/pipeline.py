@@ -65,7 +65,7 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) clash/mihomo"}
 #     shaoyouvip/free、mfuu/FreeProxies、ripaojiedian/freenode
 #     （ripaojiedian / shaoyouvip 的日韩港占比 42%~50%，是典型的“日韩港垃圾源”）
 SOURCES = [
-    # 精简后的 8 个高产、对国内友好、含美/加/台优质节点的 GitHub 源
+    # 原有 8 个高产源（完整保留）
     ("anaer/Sub", "main", "clash.yaml"),
     ("Barabama/FreeNodes", "main", "nodes/merged.yaml"),
     ("Au1rxx/free-vpn-subscriptions", "main", "output/clash.yaml"),
@@ -74,6 +74,11 @@ SOURCES = [
     ("ermaozi/get_subscribe", "main", "subscribe/clash.yml"),
     ("share-daily/node", "main", "clash.yaml"),
     ("yy1588133/proxy-pool", "main", "clash.yaml"),
+    # 新增 4 个高密度 Cloudflare 优选 IP / 节点池（只做加法）
+    ("10ium/VpnClashFaCollector", "main", "sub/final/all_cloudflare_clean_ip/clash.yaml"),
+    ("10ium/VpnClashFaCollector", "main", "sub/final/all_cloudflare/clash.yaml"),
+    ("Barabama/FreeNodes", "main", "nodes/cfmem.yaml"),
+    ("dongchengjie/airport", "main", "subs/merged/tested_within.yaml"),
 ]
 
 # 非 GitHub 的每日源站：路径里的 {Y}/{M}/{D} 由 _daily_dates() 按北京日期填充。
@@ -406,27 +411,31 @@ def write_test_config(path, proxies, port, ctl):
 
 
 def kernel_validate(exe, cfg_path, workdir, proxies):
-    """用 mihomo -t 反复剔除内核认为非法的节点，返回 (保留节点, 剔除节点)"""
-    removed = []
+    """用 mihomo -t 分片剔除内核认为非法的节点（每片 ≤500，支持大池），返回 (保留节点, 剔除节点)"""
+    kept, removed = [], []
     port, ctl = port_pair()
-    for _ in range(300):
-        write_test_config(cfg_path, proxies, port, ctl)  # -t 只校验，不真正监听端口
-        r = subprocess.run([exe, "-t", "-f", cfg_path, "-d", workdir],
-                           capture_output=True, text=True, encoding="utf-8", errors="ignore")
-        out = (r.stdout or "") + (r.stderr or "")
-        if r.returncode == 0 and "test failed" not in out:
-            return proxies, removed
-        m = re.search(r'msg="proxy (\d+): ([^"]+)"', out)
-        if not m:
-            log("  内核报错无法定位节点:\n" + out[-800:])
-            return proxies, removed
-        idx = int(m.group(1))
-        if idx >= len(proxies):
-            return proxies, removed
-        victim = proxies[idx]
-        removed.append((victim.get("type"), victim.get("server"), m.group(2)))
-        proxies = proxies[:idx] + proxies[idx + 1:]
-    return proxies, removed
+    chunk_size = 500
+    for off in range(0, len(proxies), chunk_size):
+        chunk = proxies[off:off + chunk_size]
+        for _ in range(chunk_size):
+            write_test_config(cfg_path, chunk, port, ctl)  # -t 只校验，不真正监听端口
+            r = subprocess.run([exe, "-t", "-f", cfg_path, "-d", workdir],
+                               capture_output=True, text=True, encoding="utf-8", errors="ignore")
+            out = (r.stdout or "") + (r.stderr or "")
+            if r.returncode == 0 and "test failed" not in out:
+                break
+            m = re.search(r'msg="proxy (\d+): ([^"]+)"', out)
+            if not m:
+                log("  内核报错无法定位节点:\n" + out[-800:])
+                break
+            idx = int(m.group(1))
+            if idx >= len(chunk):
+                break
+            victim = chunk[idx]
+            removed.append((victim.get("type"), victim.get("server"), m.group(2)))
+            chunk = chunk[:idx] + chunk[idx + 1:]
+        kept.extend(chunk)
+    return kept, removed
 
 
 def free_port():
@@ -490,7 +499,7 @@ def measure(exe, proxies, workdir, workers, rounds, timeout_ms, test_url):
         # 诊断：内核到底认到几个代理？直连能不能通？—— 排查“0 存活”时非常关键
         try:
             api = json.loads(urllib.request.urlopen("http://127.0.0.1:%d/proxies" % ctl, timeout=10).read())
-            visible = [k for k in api.get("proxies", {}) if k.startswith("n") and len(k) == 5]
+            visible = [k for k in api.get("proxies", {}) if k.startswith("n") and k[1:].isdigit()]
             log("  内核可见代理: %d / %d" % (len(visible), len(proxies)))
         except Exception as e:  # noqa: BLE001
             log("  [warn] 读取 /proxies 失败: %s" % str(e)[:100])
@@ -1331,6 +1340,14 @@ def classify_resi(info):
     return None
 
 
+def classify_cf(info):
+    """根据 geolocate 的 org/isp/as 判断是否为 Cloudflare 组织节点（AS13335 / AS209242）"""
+    if not info:
+        return False
+    txt = " | ".join(str(info.get(k) or "") for k in ("org", "isp", "as")).lower()
+    return "cloudflare" in txt or "as13335" in txt or "as209242" in txt
+
+
 def region_of(cc):
     for code, label in REGION_ORDER:
         if cc == code:
@@ -1404,11 +1421,11 @@ def load_previous(path, limit=60, exclude_types=None):
         nm = str(p.get("name") or "")
         m = re.search(r"·\s*(\d+)ms", nm)
         ms = int(m.group(1)) if m else 9999
-        tw_resi = 0 if ("·住宅" in nm and "TW" in nm) else 1
+        prio = 0 if ("·住宅" in nm and "TW" in nm) else (1 if "·CF" in nm else 2)
         q = {k: v for k, v in p.items() if not str(k).startswith("__") and k != "name"}
         q["__carry"] = 1
         q["__src"] = "prev"
-        scored.append((tw_resi, ms, q))
+        scored.append((prio, ms, q))
     scored.sort(key=lambda x: (x[0], x[1]))
     return [x[2] for x in scored[:limit]]
 
@@ -1475,7 +1492,7 @@ def china_proto_penalty(p):
 
 def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, write_txt=True,
           max_per_region=0, region_cap=None, resi_cap=0, max_resi_total=40, resi_cc=None,
-          max_per_ip=0):
+          max_per_ip=0, cf_cap=0, max_cf_total=60):
     selfhost = selfhost or []
     resi_cc = resi_cc or set()
     items = []
@@ -1486,20 +1503,25 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
         cc_g = (g.get("cc") or "").upper()
         # 只认 TW/CA 的住宅 IP：免费源里的“别国家宽”对用户没用，不计入住宅组
         is_resi = classify_resi(g) is True and (not resi_cc or cc_g in resi_cc)
+        is_cf = classify_cf(g)
         resi_rank = 0 if (is_resi and cc_g == "TW") else (1 if is_resi else 2)
+        prio_rank = 0 if (is_resi and cc_g == "TW") else (1 if (is_cf or is_resi) else 2)
         speed_kbps = int(d.get("speed") or 0)
         jitter_ms = int(d.get("jitter") or 0)
         gemini_ms = int(d.get("gemini_ms") or 0)
         proto_pen = china_proto_penalty(p)
-        # 综合质量分（越低越好）：Google 延迟 + Gemini 延迟权重 + 抖动惩罚 + 协议国内友好度惩罚 - 带宽加分
+        cf_bonus = 120 if is_cf else 0
+        # 综合质量分（越低越好）：Google 延迟 + Gemini 延迟权重 + 抖动惩罚 + 协议国内友好度惩罚 - Cloudflare/带宽加分
         qscore = max(1, int(d["delay"]) + (gemini_ms // 3 if gemini_ms else 0)
-                     + min(200, jitter_ms // 2) + proto_pen - min(80, speed_kbps // 25))
+                     + min(200, jitter_ms // 2) + proto_pen - cf_bonus - min(80, speed_kbps // 25))
         gem_rank = 0 if (is_resi and cc_g == "TW") else (0 if d.get("gemini") else 1)
         items.append({"node": p, "cc": g.get("cc", ""), "delay": d["delay"], "hits": d["hits"],
                       "tier": p.get("__tier", "full"),
                       "carry": bool(p.get("__carry")),
                       "resi": is_resi,
+                      "cf": is_cf,
                       "resi_rank": resi_rank,
+                      "prio_rank": prio_rank,
                       "gem_rank": gem_rank,
                       "speed": speed_kbps,
                       "jitter": jitter_ms,
@@ -1508,9 +1530,9 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
                       "gemini_ms": gemini_ms,
                       "ip": g.get("ip") or str(p.get("server")),
                       "cn": d.get("cn")})
-    # 排序优先级：验证档 > 台湾住宅(0)/其余住宅(1)/普通(2) > Gemini可用 > 综合质量分 > 老选手
+    # 排序优先级：验证档 > 台湾住宅(0)/Cloudflare及其余住宅(1)/普通(2) > Gemini可用 > 综合质量分 > 老选手
     items.sort(key=lambda x: (TIER_RANK.get(x["tier"], 3),
-                              x["resi_rank"],
+                              x["prio_rank"],
                               x["gem_rank"],
                               x["qscore"],
                               0 if x["carry"] else 1,
@@ -1532,10 +1554,10 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
                 % (max_per_ip, len(items) - len(deduped), len(items), len(deduped)))
         items = deduped
 
-    # 每地区只留最快的 N 个（region_cap 按地区覆盖，resi_cap 额外保底台湾/加拿大住宅 IP）
+    # 每地区只留最快的 N 个（region_cap 按地区覆盖，resi_cap 额外保底台湾/加拿大住宅 IP，cf_cap 额外保底 Cloudflare 组织节点）
     region_cap = region_cap or {}
     if max_per_region > 0 or region_cap:
-        kept, quota, resi_kept = [], {}, 0
+        kept, quota, resi_kept, cf_kept = [], {}, 0, 0
         for it in items:
             cc = it["cc"] if it["cc"] in ISO2 else "XX"
             lim = region_cap.get(cc, max_per_region)
@@ -1547,12 +1569,20 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
                 quota[("resi", cc)] = quota.get(("resi", cc), 0) + 1
                 resi_kept += 1
                 kept.append(it)
+            elif it.get("cf") and cf_cap > 0 and cf_kept < max_cf_total \
+                    and quota.get(("cf", cc), 0) < cf_cap:
+                quota[("cf", cc)] = quota.get(("cf", cc), 0) + 1
+                cf_kept += 1
+                kept.append(it)
+        extra_note = ""
+        if resi_kept:
+            extra_note += "；另超额保留 %d 个住宅节点（每区 ≤%d，全局 ≤%d）" % (resi_kept, resi_cap, max_resi_total)
+        if cf_kept:
+            extra_note += "；另超额保留 %d 个 Cloudflare 节点（每区 ≤%d，全局 ≤%d）" % (cf_kept, cf_cap, max_cf_total)
         log("  地区配额（默认 ≤%d%s）：剔除 %d 个慢节点，%d → %d%s"
             % (max_per_region,
                "，覆盖 " + " ".join("%s=%d" % kv for kv in sorted(region_cap.items())) if region_cap else "",
-               len(items) - len(kept), len(items), len(kept),
-               "；另超额保留 %d 个住宅节点（每区 ≤%d，全局 ≤%d）" % (resi_kept, resi_cap, max_resi_total)
-               if resi_kept else ""))
+               len(items) - len(kept), len(items), len(kept), extra_note))
         items = kept
 
     counters, proxies = {}, []
@@ -1560,7 +1590,7 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
         cc = it["cc"] if it["cc"] in ISO2 else "XX"
         counters[cc] = counters.get(cc, 0) + 1
         code = cc if cc != "XX" else "未知"
-        tag = " ·住宅" if it.get("resi") else ""
+        tag = (" ·住宅" if it.get("resi") else "") + (" ·CF" if it.get("cf") else "")
         tag += TIER_TAG.get(it["tier"], "")
         if DELAY_GATE_CN and it.get("cn") is None:
             tag += " ·未探针"      # 探针预算用完没量到的，名字上标出来，别和上海实测的混淆
@@ -1579,6 +1609,7 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
     # 自动选择/故障转移按综合质量分升序，不被跨洋 1000ms 节点占住头部
     fast_sorted = sorted(primary_items or items, key=lambda x: (x["qscore"], 0 if x["carry"] else 1))
     main_pool = [it["name"] for it in fast_sorted]
+    cf_names = [it["name"] for it in fast_sorted if it.get("cf")]
     resi_names = [it["name"] for it in items if it.get("resi")]
     gemini_names = [it["name"] for it in sorted(items, key=lambda x: (x["resi_rank"], x["gemini_ms"] or x["qscore"], x["qscore"]))
                     if it.get("gemini")]
@@ -1661,7 +1692,8 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
             groups.append({"name": "🔀 智能切换", "type": "fallback", "url": check_url,
                            "interval": 300, "proxies": ["🏠 自建节点", "♻️ 自动选择"]})
         select_list = (["🔀 智能切换"] if sh else []) + (["🏠 自建节点"] if sh else []) \
-            + ["♻️ 自动选择"] + (["🤖 Gemini优选"] if gemini_names else []) \
+            + ["♻️ 自动选择"] + (["☁️ Cloudflare优选"] if cf_names else []) \
+            + (["🤖 Gemini优选"] if gemini_names else []) \
             + (["🏠 住宅IP优选"] if resi_names else []) \
             + order + ["🔯 故障转移", "🎯 全球直连"] \
             + [lbl for _, lbl, _ in extra] \
@@ -1669,6 +1701,9 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
         groups.insert(0, {"name": "🚀 节点选择", "type": "select", "proxies": select_list})
         groups.append({"name": "♻️ 自动选择", "type": "url-test", "url": check_url,
                        "interval": 180, "tolerance": 30, "lazy": False, "proxies": main_pool})
+        if cf_names:
+            groups.append({"name": "☁️ Cloudflare优选", "type": "url-test", "url": check_url,
+                           "interval": 120, "tolerance": 30, "lazy": False, "proxies": cf_names})
         # 故障转移优先用高可用低延迟的优胜节点（主要为 TW/CA/US 及快 SG/JP）
         fb_names = [it["name"] for it in fast_sorted if it["cc"] in ("TW", "CA", "US", "SG", "JP")]
         groups.append({"name": "🔯 故障转移", "type": "fallback", "url": check_url,
@@ -1680,10 +1715,10 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
                            "proxies": resi_names})
         if gemini_names:
             groups.append({"name": "🤖 Gemini优选", "type": "url-test", "url": check_url,
-                           "interval": 180, "tolerance": 30, "proxies": gemini_names})
+                           "interval": 180, "tolerance": 30, "lazy": False, "proxies": gemini_names})
         for lbl in order:
             groups.append({"name": lbl, "type": "url-test", "url": check_url,
-                           "interval": 180, "tolerance": 30, "proxies": regions[lbl]})
+                           "interval": 180, "tolerance": 30, "lazy": False, "proxies": regions[lbl]})
         groups.append({"name": "🎯 全球直连", "type": "select", "proxies": ["DIRECT"]})
         groups.append({"name": "🛑 广告拦截", "type": "select", "proxies": ["REJECT", "DIRECT"]})
         for _, lbl, names in extra:
@@ -1848,6 +1883,10 @@ def main():
                          "额外保留，避免被同地区更快的机房节点挤掉；总量仍受 --max-resi-total 限制")
     ap.add_argument("--max-resi-total", type=int, default=40,
                     help="住宅 IP 节点全局上限（防止住宅节点过多把订阅撑大），默认 40")
+    ap.add_argument("--cf-cap", type=int, default=20,
+                    help="每个地区至少额外保留 N 个 Cloudflare 组织节点（0=关闭），默认 20")
+    ap.add_argument("--max-cf-total", type=int, default=60,
+                    help="Cloudflare 组织节点超额保留全局上限，默认 60")
     ap.add_argument("--resi-cc", default="TW,CA",
                     help="只有这些地区的住宅 IP 会被算作“住宅”（默认 TW,CA）。空字符串=不过滤。"
                          "免费源里的美/中/韩家宽节点对国内用户没用，还会挤占住宅配额")
@@ -1979,7 +2018,8 @@ def main():
     for fn in sorted(glob.glob(os.path.join(CACHE, "*.yaml"))):
         src = os.path.basename(fn)
         try:
-            doc = yaml.safe_load(open(fn, encoding="utf-8"))
+            txt_raw = open(fn, encoding="utf-8").read().replace("!<str>", "!!str")
+            doc = yaml.safe_load(txt_raw)
         except Exception as e:  # noqa: BLE001
             log("  [warn] %s 解析失败: %s" % (src, str(e)[:60]))
             continue
@@ -2170,15 +2210,20 @@ def main():
         if (geo.get(str(p.get("server")), {}).get("cc") or "").upper() == "TW"
         and classify_resi(geo.get(str(p.get("server")), {})) is True
     }
-    if tw_resi_ids:
-        log("  [保护] 识别到 %d 个台湾住宅 IP 候选，并发/跨洋速率门槛已自动放宽" % len(tw_resi_ids))
+    cf_ids = {
+        p["__id"] for p in candidates
+        if classify_cf(geo.get(str(p.get("server")), {}))
+    }
+    if tw_resi_ids or cf_ids:
+        log("  [保护] 识别到台湾住宅 %d 个 + Cloudflare 组织 %d 个，并发/抖动门槛已自动放宽"
+            % (len(tw_resi_ids), len(cf_ids)))
     st = {}
     if args.burst > 0 and candidates:
         log("[压测] 每节点 %d 并发 + 200KB 下载测速（成功率 ≥%.0f%%、抖动 ≤%dms、带宽 ≥%d KB/s）"
             % (args.burst, args.burst_min_ok * 100, args.burst_jitter, args.min_speed))
         st = stress_test(exe, candidates, work, min(args.workers, 32), args.burst,
                          args.verify_timeout, args.burst_min_ok, args.burst_jitter,
-                         min_speed=args.min_speed, protected_ids=tw_resi_ids)
+                         min_speed=args.min_speed, protected_ids=(tw_resi_ids | cf_ids))
         if "__fatal__" in st:
             annotate("并发压测无法进行：%s" % st["__fatal__"])
             return 1
@@ -2437,7 +2482,8 @@ def main():
                            region_cap=region_cap, resi_cap=args.resi_cap,
                            max_resi_total=args.max_resi_total,
                            resi_cc={c.strip().upper() for c in args.resi_cc.split(",") if c.strip()},
-                           max_per_ip=args.max_per_ip)
+                           max_per_ip=args.max_per_ip,
+                           cf_cap=args.cf_cap, max_cf_total=args.max_cf_total)
     log("  输出: %s  (免费 %d + 自建 %d)" % (args.out, len(proxies), len(sh_nodes)))
     if args.public_out:
         log("  公开版: %s  (只含免费节点)" % args.public_out)
@@ -2445,9 +2491,9 @@ def main():
     from collections import Counter
     log("  地区: %s" % dict(Counter(it["cc"] or "??" for it in items).most_common(10)))
     n_resi = sum(1 for it in items if it.get("resi"))
+    n_cf = sum(1 for it in items if it.get("cf"))
     n_gem = sum(1 for it in items if it.get("gemini"))
-    log("  住宅 IP: %d 个（只认 %s 的家宽 ISP，已优先排列，见「🏠 住宅IP优选」组）"
-        % (n_resi, "/".join(sorted({c.strip().upper() for c in args.resi_cc.split(",") if c.strip()})) or "全部"))
+    log("  住宅 IP: %d 个；Cloudflare 组织节点: %d 个（见「☁️ Cloudflare优选」组）" % (n_resi, n_cf))
 
     # 把这一轮的“漏斗”落成文件，方便事后判断是“节点质量差”还是“我们没测全”
     stats = {
@@ -2458,6 +2504,7 @@ def main():
         "verified_ngem": vstat.get("ngem", 0),           # 仅 --require-gemini 时有值
         "gemini_ok": n_gem,                              # 最终下发节点中 Gemini 可用数
         "residential_selected": n_resi,                  # 判定为住宅 IP 的下发节点数
+        "cloudflare_selected": n_cf,                     # 判定为 Cloudflare 组织的下发节点数
         "verified_dead": vstat.get("dead", 0),
         "carry_loaded": len(prev),
         "cn_probe": {
