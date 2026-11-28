@@ -396,7 +396,7 @@ def yaml_scalar(v):
     s = str(v)
     if any(ord(c) < 32 or 0x7f <= ord(c) <= 0x9f for c in s):
         return json.dumps(s, ensure_ascii=True)
-    if s == "" or any(c in s for c in ":#{}[],&*?|<>=!%@`'\"") or s.strip() != s or s.lower() in (
+    if s == "" or s[0] in "-?" or any(c in s for c in ":#{}[],&*?|<>=!%@`'\"") or s.strip() != s or s.lower() in (
             "true", "false", "null", "yes", "no", "on", "off", "~"):
         return json.dumps(s, ensure_ascii=False)
     return s
