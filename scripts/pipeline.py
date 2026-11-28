@@ -92,6 +92,12 @@ SOURCES = [
     ("NiREvil/vless", "main", "sub/clash-meta.yml"),
     ("yuan2pro/sub_merge", "main", "sub/merged_proxies_1.yaml"),
     ("yuan2pro/sub_merge", "main", "sub/merged_proxies_2.yaml"),
+    # 再追加 5 个 Cloudflare 专项节点池
+    ("asgharkapk/Sub-Config-Extractor", "main", "output_configs/clash/vpnclashfa-backup/SubConfigShuffler/10ium_Collector_mixed_cloudflare.txt.yaml"),
+    ("asgharkapk/Sub-Config-Extractor", "main", "output_configs/clash/vpnclashfa-backup/SubConfigShuffler/itsyebekhe_PSG_mix_cloudflare.txt.yaml"),
+    ("asgharkapk/Sub-Config-Extractor", "main", "output_configs/clash/vpnclashfa-backup/SubConfigShuffler/10ium_V2ray_HiNVPN_mix_cloudflare.txt.yaml"),
+    ("10ium/VpnClashFaCollector", "main", "sub/final/all_trojan/clash.yaml"),
+    ("10ium/VpnClashFaCollector", "main", "sub/final/all_vmess/clash.yaml"),
 ]
 
 # 非 GitHub 的每日源站：路径里的 {Y}/{M}/{D} 由 _daily_dates() 按北京日期填充。
@@ -1511,7 +1517,7 @@ def china_proto_penalty(p):
 
 def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, write_txt=True,
           max_per_region=0, region_cap=None, resi_cap=0, max_resi_total=40, resi_cc=None,
-          max_per_ip=0, cf_cap=0, max_cf_total=60):
+          max_per_ip=0, cf_cap=0, max_cf_total=60, non_cf_cap=0, only_regions=None):
     selfhost = selfhost or []
     resi_cc = resi_cc or set()
     items = []
@@ -1573,32 +1579,47 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
                 % (max_per_ip, len(items) - len(deduped), len(items), len(deduped)))
         items = deduped
 
-    # 每地区只留最快的 N 个（region_cap 按地区覆盖，resi_cap 额外保底台湾/加拿大住宅 IP，cf_cap 额外保底 Cloudflare 组织节点）
+    # 每地区配额：优先放行全部 Cloudflare 组织节点（受 cf_cap/max_cf_total 保护）与住宅节点，适当压缩其他普通机房节点（non_cf_cap）
     region_cap = region_cap or {}
-    if max_per_region > 0 or region_cap:
-        kept, quota, resi_kept, cf_kept = [], {}, 0, 0
+    if max_per_region > 0 or region_cap or non_cf_cap > 0:
+        kept, quota, resi_kept, cf_kept, cf_total, non_cf_cnt = [], {}, 0, 0, 0, {}
         for it in items:
             cc = it["cc"] if it["cc"] in ISO2 else "XX"
             lim = region_cap.get(cc, max_per_region)
+            if it.get("cf"):
+                cf_lim = cf_cap if cf_cap > 0 else lim
+                if cf_total < max_cf_total and quota.get(("cf", cc), 0) < cf_lim:
+                    quota[("cf", cc)] = quota.get(("cf", cc), 0) + 1
+                    quota[cc] = quota.get(cc, 0) + 1
+                    cf_total += 1
+                    if quota[cc] > lim:
+                        cf_kept += 1
+                    kept.append(it)
+                continue
+            if it.get("resi"):
+                quota[cc] = quota.get(cc, 0) + 1
+                if quota[cc] <= lim:
+                    kept.append(it)
+                elif resi_cap > 0 and resi_kept < max_resi_total and quota.get(("resi", cc), 0) < resi_cap:
+                    quota[("resi", cc)] = quota.get(("resi", cc), 0) + 1
+                    resi_kept += 1
+                    kept.append(it)
+                continue
+            if non_cf_cap > 0 and non_cf_cnt.get(cc, 0) >= non_cf_cap:
+                continue
+            if quota.get(cc, 0) >= lim:
+                continue
             quota[cc] = quota.get(cc, 0) + 1
-            if quota[cc] <= lim:
-                kept.append(it)
-            elif it.get("resi") and resi_cap > 0 and resi_kept < max_resi_total \
-                    and quota.get(("resi", cc), 0) < resi_cap:
-                quota[("resi", cc)] = quota.get(("resi", cc), 0) + 1
-                resi_kept += 1
-                kept.append(it)
-            elif it.get("cf") and cf_cap > 0 and cf_kept < max_cf_total \
-                    and quota.get(("cf", cc), 0) < cf_cap:
-                quota[("cf", cc)] = quota.get(("cf", cc), 0) + 1
-                cf_kept += 1
-                kept.append(it)
+            non_cf_cnt[cc] = non_cf_cnt.get(cc, 0) + 1
+            kept.append(it)
         extra_note = ""
         if resi_kept:
             extra_note += "；另超额保留 %d 个住宅节点（每区 ≤%d，全局 ≤%d）" % (resi_kept, resi_cap, max_resi_total)
         if cf_kept:
             extra_note += "；另超额保留 %d 个 Cloudflare 节点（每区 ≤%d，全局 ≤%d）" % (cf_kept, cf_cap, max_cf_total)
-        log("  地区配额（默认 ≤%d%s）：剔除 %d 个慢节点，%d → %d%s"
+        if non_cf_cap > 0:
+            extra_note += "；普通非 CF 节点每区压缩至 ≤%d" % non_cf_cap
+        log("  地区配额（默认 ≤%d%s）：剔除 %d 个慢/普通节点，%d → %d%s"
             % (max_per_region,
                "，覆盖 " + " ".join("%s=%d" % kv for kv in sorted(region_cap.items())) if region_cap else "",
                len(items) - len(kept), len(items), len(kept), extra_note))
@@ -1644,6 +1665,8 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
 
     regions = {}
     for it in items:
+        if only_regions and (it.get("cc") or "").upper() not in only_regions:
+            continue
         regions.setdefault(it["region"], []).append(it["name"])
     order = [lbl for _, lbl in REGION_ORDER if lbl in regions]
     order += [lbl for lbl in ("🇪🇺 欧洲", "🌍 其他") if lbl in regions]
@@ -1909,6 +1932,8 @@ def main():
                     help="每个地区至少额外保留 N 个 Cloudflare 组织节点（0=关闭），默认 20")
     ap.add_argument("--max-cf-total", type=int, default=60,
                     help="Cloudflare 组织节点超额保留全局上限，默认 60")
+    ap.add_argument("--non-cf-cap", type=int, default=0,
+                    help="普通非 Cloudflare、非住宅节点每地区上限（0=不单独限制）")
     ap.add_argument("--resi-cc", default="TW,CA",
                     help="只有这些地区的住宅 IP 会被算作“住宅”（默认 TW,CA）。空字符串=不过滤。"
                          "免费源里的美/中/韩家宽节点对国内用户没用，还会挤占住宅配额")
@@ -2104,8 +2129,9 @@ def main():
         geo = geolocate([str(p.get("server")) for p in candidates])
         before_n = len(candidates)
         candidates = [p for p in candidates
-                      if (geo.get(str(p.get("server")), {}).get("cc") or "").upper() in want_regions]
-        log("  地区预筛（%s）: %d → %d（剔除 %d 个非目标地区节点，用时 %.1fs）"
+                      if ((geo.get(str(p.get("server")), {}).get("cc") or "").upper() in want_regions
+                          or classify_cf(geo.get(str(p.get("server")), {})))]
+        log("  地区预筛（%s + Cloudflare Anycast）: %d → %d（剔除 %d 个非目标地区节点，用时 %.1fs）"
             % ("/".join(sorted(want_regions)), before_n, len(candidates), before_n - len(candidates),
                time.time() - t_geo))
         if len(candidates) < args.min_nodes:
@@ -2505,7 +2531,8 @@ def main():
                            max_resi_total=args.max_resi_total,
                            resi_cc={c.strip().upper() for c in args.resi_cc.split(",") if c.strip()},
                            max_per_ip=args.max_per_ip,
-                           cf_cap=args.cf_cap, max_cf_total=args.max_cf_total)
+                           cf_cap=args.cf_cap, max_cf_total=args.max_cf_total,
+                           non_cf_cap=args.non_cf_cap, only_regions=want_regions or None)
     log("  输出: %s  (免费 %d + 自建 %d)" % (args.out, len(proxies), len(sh_nodes)))
     if args.public_out:
         log("  公开版: %s  (只含免费节点)" % args.public_out)

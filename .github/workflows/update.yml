@@ -66,12 +66,13 @@ jobs:
           fi
           # 极致精简策略：仅保留 美/加/台 各最多 50 个（其余国家全部早期剔除），国内友好协议 + Google/Gemini 综合速度优先
           python -u scripts/pipeline.py --workers 128 --rounds 2 --timeout 3000 \
+            --verify-rounds 2 --min-hits 1 \
             --regions "US,CA,TW" \
             --cn-types "" --exclude-types "http-plain,socks5" \
             --cn-region all --max-delay 3000 \
-            --max-per-region 80 \
-            --region-cap "US=80,CA=80,TW=80" \
-            --cf-cap 60 --max-cf-total 150 \
+            --max-per-region 120 \
+            --region-cap "US=120,CA=120,TW=80" \
+            --cf-cap 150 --max-cf-total 240 --non-cf-cap 15 \
             --resi-cap 5 --max-resi-total 40 --resi-cc "TW,CA" \
             --burst 6 --burst-min-ok 0.8 --burst-jitter 300 \
             --min-nodes 3 \
