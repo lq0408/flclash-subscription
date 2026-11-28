@@ -1,13 +1,13 @@
 {
-  "generated_at": "2026-11-28 13:55:27 +0000",
-  "candidates": 7803,
-  "prefilter_alive": 2057,
-  "verified_both_ok": 488,
+  "generated_at": "2026-11-28 14:25:26 +0000",
+  "candidates": 10481,
+  "prefilter_alive": 2487,
+  "verified_both_ok": 607,
   "verified_ngem": 0,
-  "gemini_ok": 131,
+  "gemini_ok": 123,
   "residential_selected": 5,
-  "cloudflare_selected": 82,
-  "verified_dead": 270,
+  "cloudflare_selected": 126,
+  "verified_dead": 311,
   "carry_loaded": 60,
   "cn_probe": {
     "enabled": false,
@@ -21,5 +21,5 @@
     "gate_ms": 120
   },
   "coverage": null,
-  "final": 148
+  "final": 201
 }
