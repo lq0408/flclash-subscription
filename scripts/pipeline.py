@@ -79,6 +79,19 @@ SOURCES = [
     ("10ium/VpnClashFaCollector", "main", "sub/final/all_cloudflare/clash.yaml"),
     ("Barabama/FreeNodes", "main", "nodes/cfmem.yaml"),
     ("dongchengjie/airport", "main", "subs/merged/tested_within.yaml"),
+    # 新增 12 个高密度 Cloudflare VLESS/Trojan/WS/XHTTP 专项源（2026-11-28 活跃验证，纯加法）
+    ("asgharkapk/Sub-Config-Extractor", "main", "output_configs/clash/vpnclashfa-backup/SubConfigShuffler/10ium_V2ray_Config_vless_cloudflare.txt.yaml"),
+    ("asgharkapk/Sub-Config-Extractor", "main", "output_configs/clash/vpnclashfa-backup/SubConfigShuffler/10ium_V2ray_Config_All_cloudflare.txt.yaml"),
+    ("asgharkapk/Sub-Config-Extractor", "main", "output_configs/clash/vpnclashfa-backup/SubConfigShuffler/10ium_telegram_configs_collector_cloudflare.txt.yaml"),
+    ("asgharkapk/Sub-Config-Extractor", "main", "output_configs/clash/vpnclashfa-backup/SubConfigShuffler/10ium_CollectorLite_Config_mixed_cloudflare.txt.yaml"),
+    ("asgharkapk/Sub-Config-Extractor", "main", "output_configs/clash/vpnclashfa-backup/SubConfigShuffler/10ium_V2ray_Config_trojan_cloudflare.txt.yaml"),
+    ("asgharkapk/Sub-Config-Extractor", "main", "output_configs/clash/vpnclashfa-backup/SubConfigShuffler/10ium_V2Hub_merged_cloudflare.txt.yaml"),
+    ("10ium/VpnClashFaCollector", "main", "sub/final/all_vless/clash.yaml"),
+    ("looomix/Node-Configs", "main", "configs/clash/proxies.yaml"),
+    ("NiREvil/vless", "main", "edge/assets/clash-11.yaml"),
+    ("NiREvil/vless", "main", "sub/clash-meta.yml"),
+    ("yuan2pro/sub_merge", "main", "sub/merged_proxies_1.yaml"),
+    ("yuan2pro/sub_merge", "main", "sub/merged_proxies_2.yaml"),
 ]
 
 # 非 GitHub 的每日源站：路径里的 {Y}/{M}/{D} 由 _daily_dates() 按北京日期填充。
@@ -156,36 +169,42 @@ def _daily_dates():
 
 
 # ---------------------------------------------------------------- 1. 抓取
+def _fetch_one_github(repo, branch, path):
+    tag = (repo + "__" + path).replace("/", "_")
+    errs = []
+    for url in mirrors_for(repo, branch, path):
+        host = urllib.parse.urlparse(url).netloc
+        try:
+            data = http_get(url, timeout=25, retries=1)
+        except Exception as e:  # noqa: BLE001
+            errs.append("%s -> %s" % (host, str(e)[:40]))
+            continue
+        txt = data.decode("utf-8", "ignore")
+        if not re.search(r"^\s*proxies\s*:", txt, re.M):
+            errs.append("%s -> 不是 Clash 格式" % host)
+            continue
+        with open(os.path.join(CACHE, tag + ".yaml"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(txt)
+        return True, repo, len(data), host, errs
+    return False, repo, 0, "", errs
+
+
 def fetch_sources():
     os.makedirs(CACHE, exist_ok=True)
     for old in glob.glob(os.path.join(CACHE, "*.yaml")):
         os.remove(old)
     ok, failed = [], []
     t0 = time.time()
-    for repo, branch, path in SOURCES:
-        tag = (repo + "__" + path).replace("/", "_")
-        errs = []
-        done = False
-        for url in mirrors_for(repo, branch, path):
-            host = urllib.parse.urlparse(url).netloc
-            try:
-                data = http_get(url, timeout=25, retries=1)
-            except Exception as e:  # noqa: BLE001
-                errs.append("%s -> %s" % (host, str(e)[:40]))
-                continue
-            txt = data.decode("utf-8", "ignore")
-            if not re.search(r"^\s*proxies\s*:", txt, re.M):
-                errs.append("%s -> 不是 Clash 格式" % host)
-                continue
-            with open(os.path.join(CACHE, tag + ".yaml"), "w", encoding="utf-8", newline="\n") as f:
-                f.write(txt)
-            log("  [ok]   %-38s %6.0f KB  (%s)" % (repo, len(data) / 1024, host))
-            ok.append((repo, len(data)))
-            done = True
-            break
-        if not done:
-            failed.append((repo, errs))
-            log("  [skip] %-38s %s" % (repo, " | ".join(errs)[:120]))
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futs = [ex.submit(_fetch_one_github, repo, branch, path) for repo, branch, path in SOURCES]
+        for f in futs:
+            is_ok, repo, size_b, host, errs = f.result()
+            if is_ok:
+                log("  [ok]   %-38s %6.0f KB  (%s)" % (repo, size_b / 1024, host))
+                ok.append((repo, size_b))
+            else:
+                failed.append((repo, errs))
+                log("  [skip] %-38s %s" % (repo, " | ".join(errs)[:120]))
 
     # 非 GitHub 的每日源站（路径里带日期）：今天没有就退回昨天
     for label, tpl in EXTRA_SOURCES:
@@ -1609,7 +1628,10 @@ def build(nodes, geo, out_path, workers_note, selfhost=None, public_path=None, w
     # 自动选择/故障转移按综合质量分升序，不被跨洋 1000ms 节点占住头部
     fast_sorted = sorted(primary_items or items, key=lambda x: (x["qscore"], 0 if x["carry"] else 1))
     main_pool = [it["name"] for it in fast_sorted]
-    cf_names = [it["name"] for it in fast_sorted if it.get("cf")]
+    cf_names = [it["name"] for it in sorted(
+        (it for it in fast_sorted if it.get("cf")),
+        key=lambda x: (0 if str(x["node"].get("type") or "").lower() in ("vless", "trojan", "vmess", "http") else 1, x["qscore"]),
+    )]
     resi_names = [it["name"] for it in items if it.get("resi")]
     gemini_names = [it["name"] for it in sorted(items, key=lambda x: (x["resi_rank"], x["gemini_ms"] or x["qscore"], x["qscore"]))
                     if it.get("gemini")]
