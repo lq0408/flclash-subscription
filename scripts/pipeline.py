@@ -65,45 +65,25 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) clash/mihomo"}
 #     shaoyouvip/free、mfuu/FreeProxies、ripaojiedian/freenode
 #     （ripaojiedian / shaoyouvip 的日韩港占比 42%~50%，是典型的“日韩港垃圾源”）
 SOURCES = [
-    # 原有 8 个高产源（完整保留）
-    ("anaer/Sub", "main", "clash.yaml"),
+    # 14 个经留一法实测的高产 Cloudflare / 台湾住宅源（已剔除 15 个低 CF 贡献或完全重复的冗余源）
     ("Barabama/FreeNodes", "main", "nodes/merged.yaml"),
-    ("Au1rxx/free-vpn-subscriptions", "main", "output/clash.yaml"),
-    ("cysk003/freeSub", "main", "clash.yaml"),
-    ("ts-sf/fly", "main", "clash"),
-    ("ermaozi/get_subscribe", "main", "subscribe/clash.yml"),
-    ("share-daily/node", "main", "clash.yaml"),
-    ("yy1588133/proxy-pool", "main", "clash.yaml"),
-    # 新增 4 个高密度 Cloudflare 优选 IP / 节点池（只做加法）
-    ("10ium/VpnClashFaCollector", "main", "sub/final/all_cloudflare_clean_ip/clash.yaml"),
-    ("10ium/VpnClashFaCollector", "main", "sub/final/all_cloudflare/clash.yaml"),
-    ("Barabama/FreeNodes", "main", "nodes/cfmem.yaml"),
-    ("dongchengjie/airport", "main", "subs/merged/tested_within.yaml"),
-    # 新增 12 个高密度 Cloudflare VLESS/Trojan/WS/XHTTP 专项源（2026-11-28 活跃验证，纯加法）
-    ("asgharkapk/Sub-Config-Extractor", "main", "output_configs/clash/vpnclashfa-backup/SubConfigShuffler/10ium_V2ray_Config_vless_cloudflare.txt.yaml"),
-    ("asgharkapk/Sub-Config-Extractor", "main", "output_configs/clash/vpnclashfa-backup/SubConfigShuffler/10ium_V2ray_Config_All_cloudflare.txt.yaml"),
-    ("asgharkapk/Sub-Config-Extractor", "main", "output_configs/clash/vpnclashfa-backup/SubConfigShuffler/10ium_telegram_configs_collector_cloudflare.txt.yaml"),
-    ("asgharkapk/Sub-Config-Extractor", "main", "output_configs/clash/vpnclashfa-backup/SubConfigShuffler/10ium_CollectorLite_Config_mixed_cloudflare.txt.yaml"),
-    ("asgharkapk/Sub-Config-Extractor", "main", "output_configs/clash/vpnclashfa-backup/SubConfigShuffler/10ium_V2ray_Config_trojan_cloudflare.txt.yaml"),
-    ("asgharkapk/Sub-Config-Extractor", "main", "output_configs/clash/vpnclashfa-backup/SubConfigShuffler/10ium_V2Hub_merged_cloudflare.txt.yaml"),
-    ("10ium/VpnClashFaCollector", "main", "sub/final/all_vless/clash.yaml"),
+    ("anaer/Sub", "main", "clash.yaml"),
     ("looomix/Node-Configs", "main", "configs/clash/proxies.yaml"),
-    ("NiREvil/vless", "main", "edge/assets/clash-11.yaml"),
-    ("NiREvil/vless", "main", "sub/clash-meta.yml"),
-    ("yuan2pro/sub_merge", "main", "sub/merged_proxies_1.yaml"),
+    ("dongchengjie/airport", "main", "subs/merged/tested_within.yaml"),
+    ("asgharkapk/Sub-Config-Extractor", "main", "output_configs/clash/vpnclashfa-backup/SubConfigShuffler/10ium_V2ray_Config_vless_cloudflare.txt.yaml"),
+    ("Au1rxx/free-vpn-subscriptions", "main", "output/clash.yaml"),
+    ("yy1588133/proxy-pool", "main", "clash.yaml"),
+    ("10ium/VpnClashFaCollector", "main", "sub/final/all_cloudflare_clean_ip/clash.yaml"),
+    ("10ium/VpnClashFaCollector", "main", "sub/final/all_vless/clash.yaml"),
+    ("asgharkapk/Sub-Config-Extractor", "main", "output_configs/clash/vpnclashfa-backup/SubConfigShuffler/10ium_V2ray_Config_All_cloudflare.txt.yaml"),
     ("yuan2pro/sub_merge", "main", "sub/merged_proxies_2.yaml"),
-    # 再追加 5 个 Cloudflare 专项节点池
-    ("asgharkapk/Sub-Config-Extractor", "main", "output_configs/clash/vpnclashfa-backup/SubConfigShuffler/10ium_Collector_mixed_cloudflare.txt.yaml"),
-    ("asgharkapk/Sub-Config-Extractor", "main", "output_configs/clash/vpnclashfa-backup/SubConfigShuffler/itsyebekhe_PSG_mix_cloudflare.txt.yaml"),
-    ("asgharkapk/Sub-Config-Extractor", "main", "output_configs/clash/vpnclashfa-backup/SubConfigShuffler/10ium_V2ray_HiNVPN_mix_cloudflare.txt.yaml"),
-    ("10ium/VpnClashFaCollector", "main", "sub/final/all_trojan/clash.yaml"),
-    ("10ium/VpnClashFaCollector", "main", "sub/final/all_vmess/clash.yaml"),
+    ("ts-sf/fly", "main", "clash"),
+    ("asgharkapk/Sub-Config-Extractor", "main", "output_configs/clash/vpnclashfa-backup/SubConfigShuffler/10ium_V2ray_Config_trojan_cloudflare.txt.yaml"),
+    ("yuan2pro/sub_merge", "main", "sub/merged_proxies_1.yaml"),
 ]
 
 # 非 GitHub 的每日源站：路径里的 {Y}/{M}/{D} 由 _daily_dates() 按北京日期填充。
-# freeclashnode 和 clashnode 其实是同一家（内容一致），互为备用，重复节点后面会去重。
 EXTRA_SOURCES = [
-    ("freeclashnode.com", "https://freeclashnode.com/uploads/{Y}/{M}/0-{D}.yaml"),
     ("clashnode.me", "https://clashnode.me/uploads/{Y}/{M}/0-{D}.yaml"),
 ]
 
